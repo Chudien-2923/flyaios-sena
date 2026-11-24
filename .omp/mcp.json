@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "editatlas": {
+      "type": "http",
+      "url": "https://edit.trysometh.ing/mcp",
+      "instructions": false
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "editatlas": {
+      "type": "http",
+      "url": "https://edit.trysometh.ing/mcp"
+    }
+  }
+}
