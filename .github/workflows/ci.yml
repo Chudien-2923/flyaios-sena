@@ -1,0 +1,60 @@
+name: Verify flyaios-sena
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run unit tests (scripts + standalone OMP hooks)
+        run: node --test "tests/*.test.mjs"
+
+      - name: Run static repository verification (symlinks, wikilinks, privacy, licenses)
+        run: node scripts/verify-repo.mjs
+
+      - name: Verify cross-platform doctor JSON output & repo checks
+        shell: bash
+        run: |
+          node scripts/doctor.mjs --json > doctor-out.json || true
+          node -e '
+            const fs = require("fs");
+            const r = JSON.parse(fs.readFileSync("doctor-out.json", "utf8"));
+            if (!Array.isArray(r.checks) || r.checks.length < 10) {
+              throw new Error("Invalid doctor checks payload");
+            }
+            const nodeCheck = r.checks.find((c) => c.id === "node");
+            if (!nodeCheck || nodeCheck.status !== "ok") {
+              throw new Error("Expected Node >= 22 check to pass: " + JSON.stringify(nodeCheck));
+            }
+            for (const c of r.checks.filter((c) => c.category === "repo")) {
+              if (c.status !== "ok") throw new Error("Repo check failed: " + JSON.stringify(c));
+            }
+            console.log("Doctor JSON & repo checks OK on", r.platform);
+          '
+          rm -f doctor-out.json
+
+      - name: Verify zero-symlink Claude Code skill sync & clean git status
+        shell: bash
+        run: |
+          node scripts/sync-claude-skills.mjs
+          node scripts/sync-claude-skills.mjs --check
+          test -f ".claude/skills/hyperframes-sena/SKILL.md"
+          test -f ".claude/skills/sena-memory/SKILL.md"
+          test -z "$(git status --porcelain)"
