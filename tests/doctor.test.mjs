@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   formatDoctorReport,
   parseSemverMajor,
+  resolveCommandForSpawn,
   runDoctor,
 } from "../scripts/doctor.mjs";
 
@@ -79,7 +80,8 @@ test("node >= 22 passes; node 20.19.0 fails with OS-specific upgrade hint", () =
     const nodeMac = failMac.checks.find((c) => c.id === "node");
     assert.equal(failMac.ok, false);
     assert.equal(nodeMac?.status, "fail");
-    assert.match(nodeMac?.hint ?? "", /brew/i);
+    assert.match(nodeMac?.hint ?? "", /brew install node\b/i);
+    assert.doesNotMatch(nodeMac?.hint ?? "", /brew install node@22/i);
 
     const failWin = runDoctor({
       rootDir: root,
@@ -202,6 +204,89 @@ test("formatDoctorReport renders readable Vietnamese summary", () => {
     assert.match(text, /Sena Doctor/i);
     assert.match(text, /node/i);
     assert.match(text, /OK/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Windows active VIRTUAL_ENV probes python before py -3 and skips Python < 3.9", () => {
+  const root = makeTempRepo();
+  try {
+    const calls = [];
+    const winExec = (cmd, args) => {
+      calls.push([cmd, ...args].join(" "));
+      if (cmd === "python" && args.includes("--version")) return { ok: true, stdout: "Python 3.12.5", stderr: "" };
+      if (cmd === "python" && args.join(" ").includes("import numpy")) return { ok: true, stdout: "2.1.0", stderr: "" };
+      if (cmd === "python" && args.join(" ").includes("import PIL")) return { ok: true, stdout: "11.0.0", stderr: "" };
+      if (cmd === "py") return { ok: true, stdout: "Python 3.8.10", stderr: "" };
+      return makeAllOkExec({ pythonCmd: "__unused__" })(cmd, args);
+    };
+
+    const report = runDoctor({
+      rootDir: root,
+      platform: "win32",
+      nodeVersion: "v22.15.0",
+      env: { VIRTUAL_ENV: "C:\\Users\\Demo\\.venv" },
+      exec: winExec,
+    });
+    assert.equal(report.ok, true);
+    assert.equal(report.checks.find((c) => c.id === "python")?.version, "Python 3.12.5");
+    assert.equal(calls.find((c) => /^(python|py)\b/.test(c)), "python --version");
+
+    // Without VIRTUAL_ENV, if py -3 is Python 3.8 (< 3.9), probe continues to python 3.12
+    const reportFallback = runDoctor({
+      rootDir: root,
+      platform: "win32",
+      nodeVersion: "v22.15.0",
+      env: {},
+      exec: winExec,
+    });
+    assert.equal(reportFallback.ok, true);
+    assert.equal(reportFallback.checks.find((c) => c.id === "python")?.version, "Python 3.12.5");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveCommandForSpawn wraps win32 .cmd/.bat shims via cmd.exe /d /c and leaves .exe direct", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sena-winshim-"));
+  try {
+    const cmdShim = path.join(dir, "hyperframes.cmd");
+    const exeBin = path.join(dir, "ffmpeg.exe");
+    fs.writeFileSync(cmdShim, "@echo off\r\n");
+    fs.writeFileSync(exeBin, "");
+    const env = { PATH: dir, PATHEXT: ".EXE;.CMD;.BAT", ComSpec: "C:\\Windows\\System32\\cmd.exe" };
+
+    const shimSpec = resolveCommandForSpawn("hyperframes", ["--version"], { platform: "win32", env });
+    assert.equal(shimSpec.command, "C:\\Windows\\System32\\cmd.exe");
+    assert.deepEqual(shimSpec.args, ["/d", "/c", cmdShim, "--version"]);
+
+    const exeSpec = resolveCommandForSpawn("ffmpeg", ["-version"], { platform: "win32", env });
+    assert.equal(exeSpec.command, exeBin);
+    assert.deepEqual(exeSpec.args, ["-version"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ignores symlinks inside gitignored .omp/plugins and .agents/vendor-skills", () => {
+  const root = makeTempRepo();
+  try {
+    const target = path.join(root, "real.txt");
+    fs.writeFileSync(target, "ok");
+    fs.mkdirSync(path.join(root, ".omp", "plugins", "node_modules"), { recursive: true });
+    fs.mkdirSync(path.join(root, ".agents", "vendor-skills"), { recursive: true });
+    fs.symlinkSync(target, path.join(root, ".omp", "plugins", "node_modules", "hyperframes"));
+    fs.symlinkSync(target, path.join(root, ".agents", "vendor-skills", "video-check"));
+
+    const report = runDoctor({
+      rootDir: root,
+      platform: "darwin",
+      nodeVersion: "v22.15.0",
+      exec: makeAllOkExec(),
+    });
+    assert.equal(report.ok, true);
+    assert.equal(report.checks.find((c) => c.id === "repo-symlinks")?.status, "ok");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

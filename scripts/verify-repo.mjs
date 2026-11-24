@@ -29,7 +29,25 @@ const PRIVACY_PATTERNS = [
   /\bsk-[A-Za-z0-9]{16,}\b/,
   /\bghp_[A-Za-z0-9]{20,}\b/,
   /@gmail\.com/i,
+  /máy hiện\s+chỉ\s+trống|~\s*9\.8\s*GB/i,
   /máy anh|anh chốt|anh dặn|anh duyệt|anh yêu cầu|cho anh|với anh|của anh|báo anh|hỏi anh|nhờ anh|chờ anh/i,
+];
+
+const RUNTIME_IGNORED_PREFIXES = [
+  "journal/sessions",
+  ".omp/plugins",
+  ".agents/vendor-skills",
+  ".agents/omp-bridge",
+  ".superpowers",
+];
+
+const USER_OWNED_PREFIXES = [
+  "USER.md",
+  "MEMORY.md",
+  "WORK.md",
+  "memory/",
+  "jobs/",
+  "journal/",
 ];
 
 const PRIVACY_SKIP_PREFIXES = [
@@ -68,6 +86,7 @@ function walkFiles(rootDir) {
       if (skip.has(entry.name)) continue;
       const full = path.join(dir, entry.name);
       const rel = path.relative(rootDir, full).replaceAll("\\", "/");
+      if (RUNTIME_IGNORED_PREFIXES.some((p) => rel === p || rel.startsWith(`${p}/`))) continue;
       if (entry.isSymbolicLink()) {
         symlinks.push(rel);
         continue;
@@ -114,8 +133,9 @@ function resolveWikilinkTarget(rootDir, rawTarget) {
   return candidates.some((c) => fs.existsSync(c));
 }
 
-export function verifyRepo(rootDir = DEFAULT_ROOT) {
+export function verifyRepo(rootDir = DEFAULT_ROOT, options = {}) {
   const absRoot = path.resolve(rootDir);
+  const ciMode = Boolean(options.ciMode);
   const errors = [];
   const { files, symlinks } = walkFiles(absRoot);
 
@@ -185,7 +205,9 @@ export function verifyRepo(rootDir = DEFAULT_ROOT) {
       }
     }
 
-    const skipPrivacy = PRIVACY_SKIP_PREFIXES.some((p) => rel === p || rel.startsWith(p));
+    const isUserOwned = USER_OWNED_PREFIXES.some((p) => rel === p || rel.startsWith(p));
+    const skipPrivacy =
+      PRIVACY_SKIP_PREFIXES.some((p) => rel === p || rel.startsWith(p)) || (!ciMode && isUserOwned);
     if (!skipPrivacy) {
       const sanitized = raw
         .replace(/https:\/\/github\.com\/Chudien-2923\/flyaios-sena(?:\.git)?/gi, "")
@@ -212,7 +234,8 @@ function isMain() {
 }
 
 if (isMain()) {
-  const res = verifyRepo();
+  const ciMode = process.argv.includes("--ci");
+  const res = verifyRepo(DEFAULT_ROOT, { ciMode });
   if (res.ok) {
     process.stdout.write(
       `OK: ${res.stats.markdownFiles} markdown files, ${res.stats.wikilinksChecked} wikilinks, ${res.stats.skillsChecked} skills verified, 0 symlinks, 0 privacy leaks.\n`

@@ -32,7 +32,7 @@ Nguồn: docs `help`, `guides/performance`, `guides/rendering`, skill `hyperfram
 | Chrome thiếu/không khởi động | `browser ensure` (`--force`) |
 | Trang nặng chưa sẵn sàng | Tăng `--timeout` (check/snapshot), `--browser-timeout`, `--player-ready-timeout`, `--protocol-timeout` |
 | Render chậm | Draft khi lặp; snapshot trước; giảm blur/filter; ảnh ≈ kích thước giao; `benchmark`; một CSS declaration đắt có thể làm 9.8 s → 25 s |
-| Hết đĩa | Raw frame ~25 GB/phút ở 1080p30 khi đi đường disk → `clean --dry-run` rồi `clean`, `--frames-cache-dir` sang ổ khác; máy hiện chỉ trống ~9.8 GB |
+| Hết đĩa | Raw frame ~25 GB/phút ở 1080p30 khi đi đường disk → `clean --dry-run` rồi `clean`, `--frames-cache-dir` sang ổ khác; nên giữ ổ trống ≥ 10 GB |
 | Muốn HDR ra SDR | Chỉ MP4 có HDR; kiểm metadata nguồn bằng ffprobe trước |
 | Render fail cả mix âm | `data-fx-chain`/`automation` JSON lỗi (preview vẫn phát khô) → sửa JSON, nháy kép `&quot;` |
 | Export bị hạ âm lượng (`audio_lowered`) | Thêm `truepeak` trên master bus root, ceiling ≥2 dB dưới giới hạn |

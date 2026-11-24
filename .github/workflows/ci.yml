@@ -27,7 +27,7 @@ jobs:
         run: node --test "tests/*.test.mjs"
 
       - name: Run static repository verification (symlinks, wikilinks, privacy, licenses)
-        run: node scripts/verify-repo.mjs
+        run: node scripts/verify-repo.mjs --ci
 
       - name: Verify cross-platform doctor JSON output & repo checks
         shell: bash

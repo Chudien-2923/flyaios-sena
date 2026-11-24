@@ -20,8 +20,38 @@ function parsePythonMinor(versionText) {
   return match ? { major: Number(match[1]), minor: Number(match[2]) } : null;
 }
 
+export function resolveCommandForSpawn(cmd, args, options = {}) {
+  const platform = options.platform ?? process.platform;
+  const env = options.env ?? process.env;
+  if (platform !== "win32") return { command: cmd, args };
+
+  const pathVar = env.PATH ?? env.Path ?? "";
+  const rawExts = (env.PATHEXT || ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .map((e) => e.trim())
+    .filter(Boolean);
+  const pathExts = [...new Set(rawExts.flatMap((e) => [e.toLowerCase(), e.toUpperCase()]))];
+  const hasExt = /\.[A-Za-z0-9]+$/.test(cmd);
+  const dirs = pathVar.split(";").filter(Boolean);
+
+  for (const dir of dirs) {
+    const candidates = hasExt ? [cmd] : pathExts.map((ext) => `${cmd}${ext}`);
+    for (const name of candidates) {
+      const full = path.join(dir, name);
+      if (!fs.existsSync(full)) continue;
+      if (/\.(cmd|bat)$/i.test(full)) {
+        const comspec = env.ComSpec || env.COMSPEC || "cmd.exe";
+        return { command: comspec, args: ["/d", "/c", full, ...args] };
+      }
+      return { command: full, args };
+    }
+  }
+  return { command: cmd, args };
+}
+
 function defaultExec(cmd, args) {
-  const result = spawnSync(cmd, args, {
+  const resolved = resolveCommandForSpawn(cmd, args);
+  const result = spawnSync(resolved.command, resolved.args, {
     encoding: "utf8",
     windowsHide: true,
     timeout: 10_000,
@@ -39,6 +69,14 @@ function osHint(platform, hints) {
   return hints.linux;
 }
 
+const SYMLINK_SKIP_REL_PREFIXES = [
+  ".omp/plugins",
+  ".agents/vendor-skills",
+  ".agents/omp-bridge",
+  ".superpowers",
+  "journal/sessions",
+];
+
 function findSymlinks(rootDir) {
   const found = [];
   const skip = new Set([".git", "node_modules", ".venv", "venv"]);
@@ -52,8 +90,10 @@ function findSymlinks(rootDir) {
     for (const entry of entries) {
       if (skip.has(entry.name)) continue;
       const full = path.join(dir, entry.name);
+      const rel = path.relative(rootDir, full).replaceAll("\\", "/");
+      if (SYMLINK_SKIP_REL_PREFIXES.some((p) => rel === p || rel.startsWith(`${p}/`))) continue;
       if (entry.isSymbolicLink()) {
-        found.push(path.relative(rootDir, full).replaceAll("\\", "/"));
+        found.push(rel);
         continue;
       }
       if (entry.isDirectory()) walk(full);
@@ -63,27 +103,44 @@ function findSymlinks(rootDir) {
   return found;
 }
 
-function probePython(platform, exec) {
+function isPythonVersionOk(versionText) {
+  const ver = parsePythonMinor(versionText);
+  return Boolean(ver && (ver.major > 3 || (ver.major === 3 && ver.minor >= 9)));
+}
+
+function probePython(platform, exec, env = process.env) {
+  const hasVenv = Boolean(env?.VIRTUAL_ENV);
   const candidates =
     platform === "win32"
-      ? [
-          { cmd: "py", prefix: ["-3"], label: "py -3" },
-          { cmd: "python", prefix: [], label: "python" },
-          { cmd: "python3", prefix: [], label: "python3" },
-        ]
+      ? hasVenv
+        ? [
+            { cmd: "python", prefix: [], label: "python" },
+            { cmd: "python3", prefix: [], label: "python3" },
+            { cmd: "py", prefix: ["-3"], label: "py -3" },
+          ]
+        : [
+            { cmd: "py", prefix: ["-3"], label: "py -3" },
+            { cmd: "python", prefix: [], label: "python" },
+            { cmd: "python3", prefix: [], label: "python3" },
+          ]
       : [
           { cmd: "python3", prefix: [], label: "python3" },
           { cmd: "python", prefix: [], label: "python" },
         ];
 
+  let fallbackTooOld = null;
   for (const cand of candidates) {
     const res = exec(cand.cmd, [...cand.prefix, "--version"]);
     const raw = res.stdout || res.stderr;
     if (res.ok && /python/i.test(raw)) {
-      return { ...cand, version: raw.split(/\r?\n/)[0].trim() };
+      const version = raw.split(/\r?\n/)[0].trim();
+      if (isPythonVersionOk(version)) {
+        return { ...cand, version };
+      }
+      if (!fallbackTooOld) fallbackTooOld = { ...cand, version };
     }
   }
-  return null;
+  return fallbackTooOld;
 }
 
 export function runDoctor(options = {}) {
@@ -91,6 +148,7 @@ export function runDoctor(options = {}) {
   const platform = options.platform ?? process.platform;
   const exec = options.exec ?? defaultExec;
   const nodeVersion = options.nodeVersion ?? process.version;
+  const env = options.env ?? process.env;
   const checks = [];
 
   // 1. Node.js >= 22 (HyperFrames engines.node >= 22)
@@ -111,7 +169,7 @@ export function runDoctor(options = {}) {
       version: nodeVersion,
       detail: `Node.js ${nodeVersion} thấp hơn mức tối thiểu >= 22 (HyperFrames yêu cầu Node >= 22)`,
       hint: osHint(platform, {
-        darwin: "brew install node@22 (hoặc dùng nvm/fnm cài Node 22+)",
+        darwin: "brew install node (hoặc dùng nvm/fnm cài Node 22+)",
         win32: "winget install OpenJS.NodeJS.LTS (sau đó mở lại terminal để cập nhật PATH)",
         linux: "Cài Node.js 22+ từ NodeSource hoặc fnm/nvm",
       }),
@@ -170,9 +228,8 @@ export function runDoctor(options = {}) {
   }
 
   // 4. Python >= 3.9 + numpy + Pillow (required for 4 default EditAtlas skills)
-  const py = probePython(platform, exec);
-  const pyVer = py ? parsePythonMinor(py.version) : null;
-  const pyOk = Boolean(py && pyVer && (pyVer.major > 3 || (pyVer.major === 3 && pyVer.minor >= 9)));
+  const py = probePython(platform, exec, env);
+  const pyOk = Boolean(py && isPythonVersionOk(py.version));
   if (pyOk) {
     checks.push({
       id: "python",

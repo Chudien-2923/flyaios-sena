@@ -102,3 +102,41 @@ test("fails on invalid JSON MCP config or missing vendor LICENSE or missing SKIL
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("ignores post-setup runtime dirs and user-owned files in default mode, but enforces strict privacy in ciMode", () => {
+  const root = makeValidRepo();
+  try {
+    // Post-setup runtime directories containing personal paths or third-party symlinks
+    fs.mkdirSync(path.join(root, "journal", "sessions"), { recursive: true });
+    fs.writeFileSync(path.join(root, "journal", "sessions", "2026-11-24-abc.md"), "Path /Users/bob/Videos\n");
+    fs.mkdirSync(path.join(root, ".omp", "plugins", "node_modules"), { recursive: true });
+    fs.symlinkSync(path.join(root, "ROLE.md"), path.join(root, ".omp", "plugins", "node_modules", "ext"));
+    fs.mkdirSync(path.join(root, ".agents", "vendor-skills", "editatlas"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".agents", "vendor-skills", "editatlas", "note.md"), "[[broken-vendor]]\n");
+    fs.mkdirSync(path.join(root, ".superpowers"), { recursive: true });
+    fs.writeFileSync(path.join(root, ".superpowers", "tmp.md"), "/Users/bob/x\n");
+    // User-owned files customized by user
+    fs.writeFileSync(path.join(root, "USER.md"), "# User\n- Path: /Users/bob/MyVideos\n");
+
+    const defaultRes = verifyRepo(root);
+    assert.equal(defaultRes.ok, true, defaultRes.errors.join("\n"));
+
+    const ciRes = verifyRepo(root, { ciMode: true });
+    assert.equal(ciRes.ok, false);
+    assert.ok(ciRes.errors.some((e) => e.includes("USER.md")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("catches leaked personal machine disk measurement (~9.8 GB)", () => {
+  const root = makeValidRepo();
+  try {
+    fs.writeFileSync(path.join(root, "ROLE.md"), "Hết đĩa; máy hiện chỉ trống ~9.8 GB\n");
+    const res = verifyRepo(root, { ciMode: true });
+    assert.equal(res.ok, false);
+    assert.ok(res.errors.some((e) => /privacy/i.test(e)));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

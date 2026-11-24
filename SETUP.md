@@ -30,7 +30,7 @@ Nếu có hạng mục bắt buộc đang `fail`, trình đúng lệnh cài theo
 
 #### macOS (Homebrew)
 ```bash
-brew install node@22 ffmpeg yt-dlp python
+brew install node ffmpeg yt-dlp python
 python3 -m pip install --user numpy Pillow
 ```
 *(Nếu hệ thống Python báo lỗi PEP 668 `externally-managed-environment`, gợi ý tạo venv riêng hoặc cài bằng `uv`/`pipx`, không tự thêm `--break-system-packages` khi người dùng chưa đồng ý.)*
@@ -155,7 +155,7 @@ npx skills add -g EditAtlas/skills
 MCP server của EditAtlas chạy qua **Streamable HTTP** tại `https://edit.trysometh.ing/mcp` (**không cần API key**, không upload footage lên mạng):
 - **Oh My Pi (`omp`):** đã cấu hình sẵn tại `.omp/mcp.json`.
 - **Claude Code (`claude`):** đã cấu hình sẵn tại `.mcp.json` (chấp nhận trust server khi Claude Code hỏi lần đầu).
-- **Antigravity CLI (`agy`):** nếu chưa có `.agents/mcp_config.json`, tạo file `.agents/mcp_config.json` tại gốc repo (hoặc chạy `agy mcp add`) với nội dung:
+- **Antigravity CLI (`agy`):** nếu chưa có `.agents/mcp_config.json`, tạo file `.agents/mcp_config.json` tại gốc repo (hoặc chạy `agy mcp add editatlas --url https://edit.trysometh.ing/mcp`) với nội dung:
   ```json
   {
     "mcpServers": {
@@ -215,7 +215,7 @@ Khi có tag phát hành mới (ví dụ `v1.1.0`), người dùng chỉ cần n�
 
 | Nhóm | Danh sách file / thư mục | Quy tắc khi cập nhật |
 | :--- | :--- | :--- |
-| **Nhóm 1 — Của hệ thống** | `AGENTS.md`, `CLAUDE.md`, `ROLE.md`, `LEARNING.md`, `SETUP.md`, `README.md`, `VERSION`, `CHANGELOG.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `skills-lock.json`, `knowledge/`, `scripts/`, `tests/`, `.github/`, `.omp/config.yml`, `.omp/mcp.json`, `.omp/hooks/`, `.mcp.json`, `.agents/skills/{hyperframes-sena,remotion-sena,sena-memory,motion-design,skill-creator}` | Cập nhật theo bản phát hành mới; nếu người dùng từng sửa tay thì báo rõ để quyết giữ/ghép. |
+| **Nhóm 1 — Của hệ thống** | `AGENTS.md`, `CLAUDE.md`, `ROLE.md`, `LEARNING.md`, `SETUP.md`, `README.md`, `VERSION`, `CHANGELOG.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `skills-lock.json`, `knowledge/`, `scripts/`, `tests/`, `.github/`, `.omp/config.yml`, `.omp/mcp.json`, `.omp/hooks/`, `.mcp.json`, `.agents/mcp_config.json`, `.agents/skills/{hyperframes-sena,remotion-sena,sena-memory,motion-design,skill-creator}` | Cập nhật theo bản phát hành mới; nếu người dùng từng sửa tay thì báo rõ để quyết giữ/ghép. |
 | **Nhóm 2 — Của người dùng** | `USER.md`, `MEMORY.md`, các file `memory/*.md` mới hoặc dòng bài học bạn đã thêm, `WORK.md`, `jobs/`, `journal/`, mọi skill do bạn tự tạo trong `.agents/skills/<ten-skill-cua-ban>/` | **Tuyệt đối không ghi đè.** Tài sản training của bạn luôn được giữ nguyên. |
 | **Ngoài Git (`.gitignore`)** | `.claude/skills/`, `.omp/plugins/`, `.agents/vendor-skills/`, `.agents/skills.json`, `.superpowers/`, `journal/sessions/`, media nặng (`*.mp4`, `*.mov`, `*.mkv`, `*.wav`), `.env` | Sinh cục bộ trên từng máy, không commit vào Git. |
 
