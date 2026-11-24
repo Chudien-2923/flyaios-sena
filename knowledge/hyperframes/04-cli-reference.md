@@ -57,8 +57,8 @@ Nguồn: docs `packages/cli`, `developers/cli`, `guides/rendering`, skill `hyper
 | `--hdr` / `--sdr` | auto | HDR10 chỉ MP4, libx265 (không `--gpu`) |
 | `--wait` | on | một render/tài khoản tại một thời điểm |
 
-- Render >timeout tool: `HYPERFRAMES_RENDER_DETACHED=1`, log ra file, chờ bằng `until grep -qE 'Render (complete|failed)' render.log; do sleep 5; done` (không `pgrep -f`).
-- Smoke 2026-11-18: 6 s 1080p30 draft render 11.7 s (fast capture + hardware GPU trên M1), 656 KB.
+- Render >timeout tool: chạy `HYPERFRAMES_RENDER_DETACHED=1`, ghi log ra `render.log` rồi theo dõi file log tới khi có `Render complete` hoặc `Render failed` (macOS/Linux: `until grep -qE 'Render (complete|failed)' render.log; do sleep 5; done`; Windows PowerShell: `while (-not (Select-String -Quiet -Path render.log -Pattern 'Render (complete|failed)')) { Start-Sleep -Seconds 5 }`; không dùng `pgrep -f`).
+- Mốc smoke tham khảo: 6 s 1080p30 draft render ~11,7 s (fast capture + GPU phần cứng trên Apple Silicon), ~656 KB; tốc độ thực tế thay đổi theo máy.
 - Metadata `hyperframes_renderer/version` nằm trong container (không phải watermark); gỡ: `ffmpeg -i out.mp4 -map_metadata -1 -c copy clean.mp4`.
 
 ## Chọn đường render

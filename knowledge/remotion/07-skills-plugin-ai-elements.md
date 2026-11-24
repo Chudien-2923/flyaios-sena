@@ -54,7 +54,7 @@ Plugin = 13 skill build lại theo client; repo phát hành sinh tự động, s
 | Copilot CLI | `copilot plugin install remotion@awesome-copilot` | prompt thường |
 | Kimi Code | `/plugins install https://github.com/remotion-dev/kimi-code-plugin` | `/skill:remotion-create` |
 
-**Sena dùng bản Claude Code plugin qua OMP** (đã chạy 2026-11-18): `omp plugin marketplace add remotion-dev/claude-code-plugin` → `omp plugin install remotion@remotion --scope project`. Phiên OMP mới ở root Sena thấy 13 skill dạng `skill://remotion-<tên>` (không namespace). Bản này đã chuyển `.ts/.tsx` thành `.md` (asset Cesium đọc dạng code fence rồi chép vào project). Không chạy `npx remotion skills add` hay `create-video --skills` (tạo bản skill thứ hai trong project) — nếu template tự đề nghị, chọn không.
+**Sena dùng bộ plugin `remotion-dev/claude-code-plugin`** (cài theo đúng Agent Harness ở [[SETUP]]: `omp` / `claude` với `--scope project`, hoặc `agy plugin install`). Sau khi mở phiên mới, harness nhận đủ 13 skill `remotion-*`. Bản plugin đã chuyển `.ts/.tsx` thành `.md` (asset Cesium đọc dạng code fence rồi chép vào project). Không chạy `npx remotion skills add` hay `create-video --skills` (tránh tạo bản skill thứ hai trong project) — nếu template tự đề nghị, chọn không.
 
 Build:
 - **Claude**: copy dereference symlink, bỏ icon + `agents/openai.yaml`; `.ts/.tsx/.mjs` → `<file>.md` (code fence + "Copy the code below into …"), `.geojson` → `.json`; chỉ text, >256 KiB → lỗi.

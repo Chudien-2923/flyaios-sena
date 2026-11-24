@@ -126,7 +126,22 @@ node "scripts/sync-claude-skills.mjs"
    agy plugin install https://github.com/remotion-dev/claude-code-plugin
    ```
 2. Nạp 7 skill của `EditAtlas/skills` vào `.agents/vendor-skills/` (ngoài Git) và đăng ký bằng `.agents/skills.json` (ngoài Git):
-   - Shallow clone `https://github.com/EditAtlas/skills.git` vào thư mục tạm, chép 7 thư mục trong `skills/` (kèm `LICENSE`) sang `.agents/vendor-skills/`, xóa thư mục tạm.
+   - **macOS / Linux (Bash/Zsh):**
+     ```bash
+     git clone --depth 1 https://github.com/EditAtlas/skills.git ".tmp-editatlas-skills"
+     mkdir -p ".agents/vendor-skills"
+     cp -R ".tmp-editatlas-skills/skills/." ".agents/vendor-skills/"
+     cp ".tmp-editatlas-skills/LICENSE" ".agents/vendor-skills/LICENSE"
+     rm -rf ".tmp-editatlas-skills"
+     ```
+   - **Windows (PowerShell):**
+     ```powershell
+     git clone --depth 1 https://github.com/EditAtlas/skills.git ".tmp-editatlas-skills"
+     New-Item -ItemType Directory -Force -Path ".agents\vendor-skills" | Out-Null
+     Copy-Item -Recurse -Force ".tmp-editatlas-skills\skills\*" ".agents\vendor-skills\"
+     Copy-Item -Force ".tmp-editatlas-skills\LICENSE" ".agents\vendor-skills\LICENSE"
+     Remove-Item -Recurse -Force ".tmp-editatlas-skills"
+     ```
    - Tạo `.agents/skills.json` với nội dung:
      ```json
      {
@@ -198,12 +213,21 @@ node "scripts/sync-claude-skills.mjs" --check
 Khi có tag phát hành mới (ví dụ `v1.1.0`), người dùng chỉ cần nói *"Cập nhật Sena theo SETUP.md"*. AI Agent thực hiện đúng 5 bước sau:
 
 1. **Tạo nhánh sao lưu trước mọi thao tác** để bảo toàn 100% thay đổi của người dùng:
-   ```bash
-   git checkout -b "backup/$(date +%Y-%m-%d)"
-   git add -A && git commit -m "backup: before updating flyaios-sena" || true
-   git checkout main
-   ```
-   *(Trên Windows PowerShell, lấy ngày bằng `Get-Date -Format "yyyy-MM-dd"`.)*
+   - **macOS / Linux (Bash/Zsh):**
+     ```bash
+     git checkout -b "backup/$(date +%Y-%m-%d)"
+     git add -A && git commit -m "backup: before updating flyaios-sena" || true
+     git checkout main
+     ```
+   - **Windows (PowerShell):**
+     ```powershell
+     $d = Get-Date -Format "yyyy-MM-dd"
+     git checkout -b "backup/$d"
+     git add -A
+     git commit -m "backup: before updating flyaios-sena"
+     git checkout main
+     ```
+     *(Nếu không có file nào thay đổi, `git commit` báo nothing to commit — cứ tiếp tục `git checkout main` bình thường.)*
 2. Kiểm tra bản mới từ `origin`: `git fetch --tags origin` và cho người dùng xem `CHANGELOG.md` của bản mới, chờ xác nhận trước khi ghép (merge).
 3. Chỉ cập nhật các file thuộc **Nhóm 1 (File của hệ thống)**; **tuyệt đối giữ nguyên Nhóm 2 (File của người dùng)** theo bảng bên dưới. Nếu người dùng từng chỉnh tay một file ở Nhóm 1, báo rõ phần chênh lệch và hỏi giữ hay ghép.
 4. Nếu người dùng đang dùng Claude Code, chạy lại `node "scripts/sync-claude-skills.mjs"` (không ảnh hưởng skill tự tạo trong `.claude/skills/`).
@@ -217,7 +241,7 @@ Khi có tag phát hành mới (ví dụ `v1.1.0`), người dùng chỉ cần n�
 | :--- | :--- | :--- |
 | **Nhóm 1 — Của hệ thống** | `AGENTS.md`, `CLAUDE.md`, `ROLE.md`, `LEARNING.md`, `SETUP.md`, `README.md`, `VERSION`, `CHANGELOG.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `skills-lock.json`, `knowledge/`, `scripts/`, `tests/`, `.github/`, `.omp/config.yml`, `.omp/mcp.json`, `.omp/hooks/`, `.mcp.json`, `.agents/mcp_config.json`, `.agents/skills/{hyperframes-sena,remotion-sena,sena-memory,motion-design,skill-creator}` | Cập nhật theo bản phát hành mới; nếu người dùng từng sửa tay thì báo rõ để quyết giữ/ghép. |
 | **Nhóm 2 — Của người dùng** | `USER.md`, `MEMORY.md`, các file `memory/*.md` mới hoặc dòng bài học bạn đã thêm, `WORK.md`, `jobs/`, `journal/`, mọi skill do bạn tự tạo trong `.agents/skills/<ten-skill-cua-ban>/` | **Tuyệt đối không ghi đè.** Tài sản training của bạn luôn được giữ nguyên. |
-| **Ngoài Git (`.gitignore`)** | `.claude/skills/`, `.omp/plugins/`, `.agents/vendor-skills/`, `.agents/skills.json`, `.superpowers/`, `journal/sessions/`, media nặng (`*.mp4`, `*.mov`, `*.mkv`, `*.wav`), `.env` | Sinh cục bộ trên từng máy, không commit vào Git. |
+| **Ngoài Git (`.gitignore`)** | `.claude/skills/`, `.claude/settings.local.json`, `.omp/plugins/`, `.agents/vendor-skills/`, `.agents/skills.json`, `.superpowers/`, `journal/sessions/`, media nặng (`*.mp4`, `*.mov`, `*.mkv`, `*.wav`), `.env` | Sinh cục bộ trên từng máy, không commit vào Git. |
 
 ---
 

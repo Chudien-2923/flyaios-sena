@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -90,5 +91,15 @@ test("both OMP hook source files contain zero FlyAIOS or private strings", () =>
       /OS Intelligence|11-factory|brand\/feedback|Team Lead|tiamo|learning-loop\.json|\/Users\/|Project Gate/i,
       `Found forbidden string in ${rel}`
     );
+  }
+});
+
+test("uncommittedLessons short-circuits cleanly when .git directory is absent (ZIP download)", () => {
+  const zipDir = fs.mkdtempSync(path.join(os.tmpdir(), "sena-zip-nogit-"));
+  try {
+    fs.writeFileSync(path.join(zipDir, "MEMORY.md"), "# Memory\n");
+    assert.deepEqual(loop.uncommittedLessons(zipDir), []);
+  } finally {
+    fs.rmSync(zipDir, { recursive: true, force: true });
   }
 });

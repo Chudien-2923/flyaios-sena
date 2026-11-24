@@ -653,8 +653,9 @@ function gitStatus(dir: string, paths: string[]): string[] {
 	return pathsOut;
 }
 
-function uncommittedLessons(): string[] {
-	return gitStatus(ROOT, ["MEMORY.md", "memory"]).filter(filePath => !/(^|\/)readme\.md$/i.test(filePath));
+export function uncommittedLessons(dir = ROOT): string[] {
+	if (!existsSync(join(dir, ".git"))) return [];
+	return gitStatus(dir, ["MEMORY.md", "memory"]).filter(filePath => !/(^|\/)readme\.md$/i.test(filePath));
 }
 
 function expiredLessons(topics: TopicInfo[]): string[] {

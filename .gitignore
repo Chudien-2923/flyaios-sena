@@ -1,5 +1,6 @@
 # Harness runtime & generated directories
 .claude/skills/
+.claude/settings.local.json
 .omp/*
 !.omp/config.yml
 !.omp/hooks/

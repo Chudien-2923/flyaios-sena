@@ -6,6 +6,8 @@ import path from "node:path";
 
 import { verifyRepo } from "../scripts/verify-repo.mjs";
 
+const SYMLINK_DIR_TYPE = process.platform === "win32" ? "junction" : "dir";
+
 function makeValidRepo(label = "verify repo spaces") {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `${label}-`));
   fs.mkdirSync(path.join(root, ".omp"), { recursive: true });
@@ -50,7 +52,9 @@ test("passes on a valid minimal fixture including spaces in path and allowed pub
 test("fails when any symlink exists inside the repo", () => {
   const root = makeValidRepo();
   try {
-    fs.symlinkSync(path.join(root, "ROLE.md"), path.join(root, "ROLE-link.md"));
+    const targetDir = path.join(root, "real-dir");
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.symlinkSync(targetDir, path.join(root, "link-dir"), SYMLINK_DIR_TYPE);
     const res = verifyRepo(root);
     assert.equal(res.ok, false);
     assert.ok(res.errors.some((e) => /symlink/i.test(e)));
@@ -110,7 +114,9 @@ test("ignores post-setup runtime dirs and user-owned files in default mode, but 
     fs.mkdirSync(path.join(root, "journal", "sessions"), { recursive: true });
     fs.writeFileSync(path.join(root, "journal", "sessions", "2026-11-24-abc.md"), "Path /Users/bob/Videos\n");
     fs.mkdirSync(path.join(root, ".omp", "plugins", "node_modules"), { recursive: true });
-    fs.symlinkSync(path.join(root, "ROLE.md"), path.join(root, ".omp", "plugins", "node_modules", "ext"));
+    const pluginSrc = path.join(root, ".omp", "plugins", "ext-src");
+    fs.mkdirSync(pluginSrc, { recursive: true });
+    fs.symlinkSync(pluginSrc, path.join(root, ".omp", "plugins", "node_modules", "ext"), SYMLINK_DIR_TYPE);
     fs.mkdirSync(path.join(root, ".agents", "vendor-skills", "editatlas"), { recursive: true });
     fs.writeFileSync(path.join(root, ".agents", "vendor-skills", "editatlas", "note.md"), "[[broken-vendor]]\n");
     fs.mkdirSync(path.join(root, ".superpowers"), { recursive: true });
@@ -136,6 +142,35 @@ test("catches leaked personal machine disk measurement (~9.8 GB)", () => {
     const res = verifyRepo(root, { ciMode: true });
     assert.equal(res.ok, false);
     assert.ok(res.errors.some((e) => /privacy/i.test(e)));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("validates #heading anchors, case-sensitive wikilink filenames, and order-independent YAML frontmatter", () => {
+  const root = makeValidRepo();
+  try {
+    // 1. Order-independent frontmatter (description before name) must PASS
+    fs.writeFileSync(
+      path.join(root, ".agents", "skills", "sena-memory", "SKILL.md"),
+      "---\ndescription: Memory skill\nname: sena-memory\n---\n# Memory\n"
+    );
+    // 2. Valid #heading anchor must PASS
+    fs.writeFileSync(path.join(root, "AGENTS.md"), "# Sena\nXem [[ROLE#Muc 1]]\n");
+    const okRes = verifyRepo(root);
+    assert.equal(okRes.ok, true, okRes.errors.join("\n"));
+
+    // 3. Broken #heading anchor must FAIL
+    fs.writeFileSync(path.join(root, "AGENTS.md"), "# Sena\nXem [[ROLE#Muc Khong Ton Tai]]\n");
+    const badHeading = verifyRepo(root);
+    assert.equal(badHeading.ok, false);
+    assert.ok(badHeading.errors.some((e) => e.includes("ROLE#Muc Khong Ton Tai")));
+
+    // 4. Case-mismatched filename must FAIL even on case-insensitive macOS/Windows FS
+    fs.writeFileSync(path.join(root, "AGENTS.md"), "# Sena\nXem [[role]]\n");
+    const badCase = verifyRepo(root);
+    assert.equal(badCase.ok, false);
+    assert.ok(badCase.errors.some((e) => e.includes("[[role]]")));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

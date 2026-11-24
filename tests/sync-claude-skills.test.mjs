@@ -1,10 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { MANAGED_MARKER, syncClaudeSkills } from "../scripts/sync-claude-skills.mjs";
+
+const SYNC_SCRIPT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../scripts/sync-claude-skills.mjs");
+const SYMLINK_DIR_TYPE = process.platform === "win32" ? "junction" : "dir";
 
 function makeFixture(label = "sena sync spaces") {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `${label}-`));
@@ -101,5 +106,29 @@ test("check mode detects out-of-sync without modifying files, then passes after 
     assert.equal(after.inSync, true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("preserves user-created symlink in .claude/skills/ and surfaces preserved note in --check output", () => {
+  const root = makeFixture();
+  const externalSkill = fs.mkdtempSync(path.join(os.tmpdir(), "sena-user-sym-"));
+  try {
+    fs.writeFileSync(path.join(externalSkill, "SKILL.md"), "# User symlinked skill\n");
+    const targetDir = path.join(root, ".claude", "skills");
+    fs.mkdirSync(targetDir, { recursive: true });
+    const collidingLink = path.join(targetDir, "alpha-skill");
+    fs.symlinkSync(externalSkill, collidingLink, SYMLINK_DIR_TYPE);
+
+    const res = syncClaudeSkills({ rootDir: root });
+    assert.deepEqual(res.synced, ["beta-skill"]);
+    assert.deepEqual(res.preserved, ["alpha-skill"]);
+    assert.equal(fs.lstatSync(collidingLink).isSymbolicLink(), true);
+
+    const checkRun = spawnSync(process.execPath, [SYNC_SCRIPT, "--check", "--root", root], { encoding: "utf8" });
+    assert.equal(checkRun.status, 0, checkRun.stderr || checkRun.stdout);
+    assert.match(checkRun.stdout, /alpha-skill/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(externalSkill, { recursive: true, force: true });
   }
 });

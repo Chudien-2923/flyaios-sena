@@ -28,7 +28,7 @@ Nguồn: docs `help`, `guides/performance`, `guides/rendering`, skill `hyperfram
 | Mỗi render tự cộng ~45 s | Composition không có GSAP timeline → `data-no-timeline` |
 | Render khác preview | Font chưa bundle, media remote, effect đặc thù trình duyệt → bundle font, đưa media vào project; tái lập bằng `render --docker` |
 | "No composition found" | `index.html` có root với `data-composition-id`, `data-width/height` |
-| "FFmpeg not found" | `brew install ffmpeg`, `doctor` lại |
+| "FFmpeg not found" | Cài FFmpeg (macOS: `brew install ffmpeg`; Windows: `winget install Gyan.FFmpeg` rồi mở lại terminal; Linux: `sudo apt install -y ffmpeg`), chạy `doctor` lại |
 | Chrome thiếu/không khởi động | `browser ensure` (`--force`) |
 | Trang nặng chưa sẵn sàng | Tăng `--timeout` (check/snapshot), `--browser-timeout`, `--player-ready-timeout`, `--protocol-timeout` |
 | Render chậm | Draft khi lặp; snapshot trước; giảm blur/filter; ảnh ≈ kích thước giao; `benchmark`; một CSS declaration đắt có thể làm 9.8 s → 25 s |

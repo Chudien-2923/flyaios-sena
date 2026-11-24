@@ -122,15 +122,98 @@ function stripCodeForWikilinks(markdown) {
   return out.join("\n");
 }
 
-function resolveWikilinkTarget(rootDir, rawTarget) {
-  const cleaned = rawTarget.split("|")[0].split("#")[0].trim();
-  if (!cleaned) return true;
-  const candidates = [
-    path.join(rootDir, cleaned),
-    path.join(rootDir, `${cleaned}.md`),
-    path.join(rootDir, cleaned, "README.md"),
-  ];
-  return candidates.some((c) => fs.existsSync(c));
+function existsCaseSensitive(rootDir, relPath) {
+  const segments = relPath.replaceAll("\\", "/").split("/").filter(Boolean);
+  let current = rootDir;
+  for (const seg of segments) {
+    let entries;
+    try {
+      entries = fs.readdirSync(current);
+    } catch {
+      return false;
+    }
+    if (!entries.includes(seg)) return false;
+    current = path.join(current, seg);
+  }
+  return fs.existsSync(current);
+}
+
+function normalizeHeading(text) {
+  return text
+    .normalize("NFC")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/[*_~]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function slugifyHeading(text) {
+  return normalizeHeading(text)
+    .replace(/[^\p{L}\p{N}\s-]/gu, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function extractMarkdownHeadings(markdown) {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const headings = [];
+  let fence = null;
+  for (const line of lines) {
+    const m = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (m && m[1][0] === fence[0] && m[1].length >= fence.length) fence = null;
+      continue;
+    }
+    if (m) {
+      fence = m[1];
+      continue;
+    }
+    const hm = /^#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
+    if (hm) headings.push(hm[1]);
+  }
+  return headings;
+}
+
+function hasValidSkillFrontmatter(content) {
+  const fmMatch = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(content);
+  if (!fmMatch) return false;
+  const fm = fmMatch[1];
+  return /^name:\s*\S+/m.test(fm) && /^description:\s*\S+/m.test(fm);
+}
+
+function resolveWikilinkTarget(rootDir, rawTarget, sourceRel, headingCache) {
+  const beforeAlias = rawTarget.split("|")[0];
+  const hashIdx = beforeAlias.indexOf("#");
+  const filePart = (hashIdx >= 0 ? beforeAlias.slice(0, hashIdx) : beforeAlias).trim();
+  const headingPart = hashIdx >= 0 ? beforeAlias.slice(hashIdx + 1).trim() : "";
+
+  let resolvedRel = null;
+  if (!filePart) {
+    resolvedRel = sourceRel;
+  } else {
+    const cleanRel = filePart.replace(/^\.\/+/, "").replace(/\/+$/, "");
+    const candidates = [cleanRel, `${cleanRel}.md`, `${cleanRel}/README.md`];
+    for (const cand of candidates) {
+      if (existsCaseSensitive(rootDir, cand)) {
+        resolvedRel = cand;
+        break;
+      }
+    }
+  }
+  if (!resolvedRel) return false;
+  if (!headingPart) return true;
+
+  const fullPath = path.join(rootDir, resolvedRel);
+  if (!fs.statSync(fullPath).isFile()) return false;
+  let headings = headingCache.get(resolvedRel);
+  if (!headings) {
+    headings = extractMarkdownHeadings(fs.readFileSync(fullPath, "utf8"));
+    headingCache.set(resolvedRel, headings);
+  }
+  const wantNorm = normalizeHeading(headingPart);
+  const wantSlug = slugifyHeading(headingPart);
+  return headings.some((h) => normalizeHeading(h) === wantNorm || slugifyHeading(h) === wantSlug);
 }
 
 export function verifyRepo(rootDir = DEFAULT_ROOT, options = {}) {
@@ -176,7 +259,7 @@ export function verifyRepo(rootDir = DEFAULT_ROOT, options = {}) {
     }
     skillsChecked++;
     const content = fs.readFileSync(full, "utf8").replace(/\r\n/g, "\n");
-    if (!/^---\n[\s\S]*?name:\s*\S+[\s\S]*?description:\s*\S+[\s\S]*?\n---/m.test(content)) {
+    if (!hasValidSkillFrontmatter(content)) {
       errors.push(`Invalid or missing YAML frontmatter (name/description) in ${rel}`);
     }
   }
@@ -184,6 +267,7 @@ export function verifyRepo(rootDir = DEFAULT_ROOT, options = {}) {
   // 5. Wikilinks & Privacy scan across Markdown / text files
   let markdownFiles = 0;
   let wikilinksChecked = 0;
+  const headingCache = new Map();
   const textExts = new Set([".md", ".mjs", ".js", ".ts", ".json", ".yml", ".yaml", ".txt"]);
 
   for (const { full, rel } of files) {
@@ -198,7 +282,7 @@ export function verifyRepo(rootDir = DEFAULT_ROOT, options = {}) {
         for (const match of stripped.matchAll(/\[\[([^\]]+)\]\]/g)) {
           wikilinksChecked++;
           const target = match[1];
-          if (!resolveWikilinkTarget(absRoot, target)) {
+          if (!resolveWikilinkTarget(absRoot, target, rel, headingCache)) {
             errors.push(`Broken wikilink in ${rel}: [[${target}]]`);
           }
         }

@@ -58,13 +58,17 @@ export function syncClaudeSkills(options = {}) {
   let inSync = true;
 
   const existingEntries = fs.existsSync(targetDir)
-    ? fs.readdirSync(targetDir, { withFileTypes: true }).filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))
+    ? fs
+        .readdirSync(targetDir, { withFileTypes: true })
+        .filter((e) => e.isDirectory() || e.isSymbolicLink())
+        .sort((a, b) => a.name.localeCompare(b.name))
     : [];
 
-  // 1. Inspect existing directories in .claude/skills/
+  // 1. Inspect existing directories & symlinks in .claude/skills/
   for (const entry of existingEntries) {
     const dst = path.join(targetDir, entry.name);
-    const isManaged = fs.existsSync(path.join(dst, MANAGED_MARKER));
+    // Sena never creates symlinks in .claude/skills/; always preserve user-created symlinks.
+    const isManaged = !entry.isSymbolicLink() && fs.existsSync(path.join(dst, MANAGED_MARKER));
     if (!isManaged) {
       preserved.push(entry.name);
       continue;
@@ -119,13 +123,20 @@ function isMain() {
 
 if (isMain()) {
   const checkOnly = process.argv.includes("--check");
-  const result = syncClaudeSkills({ checkOnly });
+  const rootFlagIdx = process.argv.indexOf("--root");
+  const rootDir = rootFlagIdx >= 0 && process.argv[rootFlagIdx + 1] ? process.argv[rootFlagIdx + 1] : DEFAULT_ROOT;
+  const result = syncClaudeSkills({ rootDir, checkOnly });
   if (checkOnly) {
     process.stdout.write(
       result.inSync
         ? `OK: .claude/skills/ khớp .agents/skills/ (${result.synced.length} skill).\n`
         : `OUT OF SYNC: chạy "node scripts/sync-claude-skills.mjs" để đồng bộ.\n`
     );
+    if (result.preserved.length > 0) {
+      process.stdout.write(
+        `Lưu ý: giữ nguyên ${result.preserved.length} mục tự tạo/symlink trong .claude/skills/ (không bị ghi đè): ${result.preserved.join(", ")}\n`
+      );
+    }
     process.exit(result.inSync ? 0 : 1);
   }
   process.stdout.write(
@@ -136,7 +147,7 @@ if (isMain()) {
   }
   if (result.preserved.length > 0) {
     process.stdout.write(
-      `Giữ nguyên ${result.preserved.length} thư mục tự tạo (không có ${MANAGED_MARKER}): ${result.preserved.join(", ")}\n`
+      `Giữ nguyên ${result.preserved.length} mục tự tạo/symlink (không có ${MANAGED_MARKER}): ${result.preserved.join(", ")}\n`
     );
   }
 }

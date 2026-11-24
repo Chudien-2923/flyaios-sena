@@ -11,6 +11,8 @@ import {
   runDoctor,
 } from "../scripts/doctor.mjs";
 
+const SYMLINK_DIR_TYPE = process.platform === "win32" ? "junction" : "dir";
+
 function makeTempRepo(suffix = "repo with spaces") {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `sena-doc-${suffix}-`));
   fs.mkdirSync(path.join(root, ".omp"), { recursive: true });
@@ -135,8 +137,9 @@ test("missing Pillow or numpy fails individually and Windows probes py -3", () =
 test("handles rootDir with spaces and flags symlinks inside repo as fail", () => {
   const root = makeTempRepo("my videos folder");
   try {
-    fs.writeFileSync(path.join(root, "real.txt"), "ok");
-    fs.symlinkSync(path.join(root, "real.txt"), path.join(root, "link.txt"));
+    const targetDir = path.join(root, "real-dir");
+    fs.mkdirSync(targetDir, { recursive: true });
+    fs.symlinkSync(targetDir, path.join(root, "link-dir"), SYMLINK_DIR_TYPE);
 
     const report = runDoctor({
       rootDir: root,
@@ -147,7 +150,7 @@ test("handles rootDir with spaces and flags symlinks inside repo as fail", () =>
     assert.equal(report.ok, false);
     const sym = report.checks.find((c) => c.id === "repo-symlinks");
     assert.equal(sym?.status, "fail");
-    assert.match(sym?.detail ?? "", /link\.txt/);
+    assert.match(sym?.detail ?? "", /link-dir/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -272,12 +275,12 @@ test("resolveCommandForSpawn wraps win32 .cmd/.bat shims via cmd.exe /d /c and l
 test("ignores symlinks inside gitignored .omp/plugins and .agents/vendor-skills", () => {
   const root = makeTempRepo();
   try {
-    const target = path.join(root, "real.txt");
-    fs.writeFileSync(target, "ok");
+    const targetDir = path.join(root, "real-dir");
+    fs.mkdirSync(targetDir, { recursive: true });
     fs.mkdirSync(path.join(root, ".omp", "plugins", "node_modules"), { recursive: true });
     fs.mkdirSync(path.join(root, ".agents", "vendor-skills"), { recursive: true });
-    fs.symlinkSync(target, path.join(root, ".omp", "plugins", "node_modules", "hyperframes"));
-    fs.symlinkSync(target, path.join(root, ".agents", "vendor-skills", "video-check"));
+    fs.symlinkSync(targetDir, path.join(root, ".omp", "plugins", "node_modules", "hyperframes"), SYMLINK_DIR_TYPE);
+    fs.symlinkSync(targetDir, path.join(root, ".agents", "vendor-skills", "video-check"), SYMLINK_DIR_TYPE);
 
     const report = runDoctor({
       rootDir: root,
