@@ -11,7 +11,8 @@
 .superpowers/
 
 # Session logs & temporary files
-journal/sessions/
+journal/sessions/*
+!journal/sessions/.gitignore
 tmp/
 .cache/
 
