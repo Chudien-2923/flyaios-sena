@@ -7,13 +7,15 @@ import { fileURLToPath } from "node:url";
 
 import * as loop from "../.omp/hooks/pre/learning-loop.ts";
 import { buildLearnPrompt, needsLearnPolicy } from "../.omp/hooks/pre/learn.ts";
+import { parseTopic, splitExpired } from "../scripts/recall.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 test("learning-loop exports core standalone functions and drops Brand/Project exports", () => {
   assert.equal(typeof loop.isCloseCommand, "function");
   assert.equal(typeof loop.isLoggable, "function");
-  assert.equal(typeof loop.parseTopic, "function");
+  assert.equal(typeof loop.planPromptLessons, "function");
+  assert.equal(typeof loop.planToolLessons, "function");
   assert.equal(typeof loop.reconstructState, "function");
   assert.equal(typeof loop.closeInstruction, "function");
   assert.equal("parseBrandConfig" in loop, false);
@@ -30,15 +32,15 @@ test("isCloseCommand and isLoggable handle slash commands and Windows/macOS vide
   assert.equal(loop.isLoggable("/tmp/demo-video.mp4 cắt giúp mình"), true);
 });
 
-test("parseTopic, splitExpired, reconstructState and diffSnapshots work without brandHashes", () => {
-  const topic = loop.parseTopic(
+test("parseTopic, splitExpired, reconstructState and diffSnapshots work without brand state", () => {
+  const topic = parseTopic(
     "hyperframes.md",
     "---\ntitle: HyperFrames\ndescription: Quy ước dựng video\naliases: [hyperframe, hf]\n---\n- 2026-11-24 · Dùng kho miễn phí\n"
   );
   assert.equal(topic.slug, "hyperframes");
   assert.ok(topic.keywords.includes("hf"));
 
-  const expired = loop.splitExpired(
+  const expired = splitExpired(
     "- 2026-11-01 · Quy tắc tạm · đến 2026-11-10\n- 2026-11-01 · Quy tắc lâu dài\n",
     "2026-11-24"
   );
@@ -47,7 +49,8 @@ test("parseTopic, splitExpired, reconstructState and diffSnapshots work without 
 
   const state = loop.reconstructState([{ type: "compaction" }]);
   assert.equal("brandHashes" in state, false);
-  assert.deepEqual(state.topicHashes, {});
+  assert.deepEqual(state.lessons, {});
+  assert.deepEqual(state.reload, {});
 
   const diff = loop.diffSnapshots(
     { "MEMORY.md": { hash: "aaa", lines: 5 } },
@@ -83,8 +86,8 @@ test("learn.ts policy lifecycle and prompt use neutral Vietnamese and .agents/sk
   assert.equal(loop.isCloseCommand(buildLearnPrompt("học quy trình chốt bài học")), false);
 });
 
-test("both OMP hook source files contain zero FlyAIOS or private strings", () => {
-  for (const rel of [".omp/hooks/pre/learning-loop.ts", ".omp/hooks/pre/learn.ts"]) {
+test("OMP hooks and the shared recall script contain zero FlyAIOS or private strings", () => {
+  for (const rel of [".omp/hooks/pre/learning-loop.ts", ".omp/hooks/pre/learn.ts", "scripts/recall.mjs"]) {
     const src = fs.readFileSync(path.join(ROOT, rel), "utf8");
     assert.doesNotMatch(
       src,

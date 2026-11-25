@@ -33,7 +33,8 @@ Người dùng có thể đào tạo Sena dựng ngày càng đúng gu qua thờ
 - **Chốt bài học & lưu gu:** khi người dùng nói *"chốt bài học"*, *"nhớ gu này"*, *"quên quy tắc X"* (hoặc `/sena-memory`, trên OMP có thêm `/chot`), mở [[.agents/skills/sena-memory/SKILL]] — **luôn đề xuất bảng tóm tắt và chờ người dùng duyệt từng dòng trước khi ghi** vào [[MEMORY]] hoặc `memory/<slug>.md`.
 - **Nhiều kênh / nhiều khách hàng:** tách gu riêng theo từng file `memory/<ten-kenh>.md` (hoạt động thống nhất trên cả 3 harness).
 - **Đóng gói quy trình lặp lại thành Skill riêng:** dùng [[.agents/skills/skill-creator/SKILL]] (trên OMP có lệnh `/learn`), trình bản đề xuất trước khi lưu vào `.agents/skills/<ten-skill>/SKILL.md`. Nếu dùng Claude Code, nhắc chạy lại `node scripts/sync-claude-skills.mjs`.
-- **Khi chạy bằng OMP:** hai hook `.omp/hooks/pre/learning-loop.ts` và `learn.ts` tự động ghi nhật ký phiên (ngoài Git tại `journal/sessions/`), tự nạp `MEMORY.md`/chủ đề đúng từ khóa và hỗ trợ `/chot`, `/nap`, `/learn`. Trên Claude Code và Antigravity CLI, Sena chủ động thực hiện đúng cùng quy tắc bằng việc đọc file đầu phiên và dùng skill `sena-memory`.
+- **Khi chạy bằng OMP:** hai hook `.omp/hooks/pre/learning-loop.ts` và `learn.ts` tự động ghi nhật ký phiên (ngoài Git tại `journal/sessions/`), tự nạp `MEMORY.md`, giao **từng dòng** bài học chủ đề đúng tình huống (khi người dùng nhắn, khi Sena sắp chạy lệnh bash liên quan, sau khi ghi/sửa file liên quan) và hỗ trợ `/chot`, `/nap`, `/learn`. Trên Claude Code và Antigravity CLI, Sena đọc `MEMORY.md` đầu phiên và tự tra bài học chủ đề bằng `node scripts/recall.mjs "<tình huống>"` trước khi lên phương án, trước khi dựng và trước khi giao; chốt bài học bằng skill `sena-memory`.
+- **Giao bản xem trước hoặc kết quả:** kèm mục **Bài học đã áp dụng** theo [[LEARNING]].
 
 ## 4. Tổ chức project video và giới hạn dữ liệu
 

@@ -29,10 +29,10 @@ Kho này được thiết kế **không dùng symlink (đường dẫn tắt)** 
 
 | Công cụ AI (`Agent Harness`) | Hướng dẫn vào việc | Kho Skill của Sena | MCP EditAtlas | Tự training gu dựng |
 | :--- | :--- | :--- | :--- | :--- |
-| **Oh My Pi (`omp`)** | `AGENTS.md` | `.agents/skills/` (qua `.omp/config.yml`) | `.omp/mcp.json` (có sẵn) | Luật Markdown + `sena-memory` + **2 hook tự động** (`/chot`, `/nap`, `/learn`) |
-| **Claude Code (`claude`)** | `CLAUDE.md` → `AGENTS.md` | `.claude/skills/` (đồng bộ bằng `scripts/sync-claude-skills.mjs`, ngoài Git) | `.mcp.json` (có sẵn) | Luật đọc đầu phiên + skill `sena-memory` + `skill-creator` |
-| **Antigravity CLI (`agy`)** | `AGENTS.md` | `.agents/skills/` (tự nhận native) | `.agents/mcp_config.json` (hướng dẫn trong `SETUP.md`) | Luật đọc đầu phiên + skill `sena-memory` + `skill-creator` |
-| **Cursor / Codex / khác** | `AGENTS.md` | `.agents/skills/` + nhánh dự phòng `npx skills add -g` | Copy cấu hình HTTP từ `SETUP.md` | Luật đọc đầu phiên + skill `sena-memory` |
+| **Oh My Pi (`omp`)** | `AGENTS.md` | `.agents/skills/` (qua `.omp/config.yml`) | `.omp/mcp.json` (có sẵn) | Luật Markdown + `sena-memory` + **2 hook tự động** (`/chot`, `/nap`, `/learn`; tự giao từng dòng bài học đúng lúc) |
+| **Claude Code (`claude`)** | `CLAUDE.md` → `AGENTS.md` | `.claude/skills/` (đồng bộ bằng `scripts/sync-claude-skills.mjs`, ngoài Git) | `.mcp.json` (có sẵn) | Luật đọc đầu phiên + tra bài học `scripts/recall.mjs` + skill `sena-memory` + `skill-creator` |
+| **Antigravity CLI (`agy`)** | `AGENTS.md` | `.agents/skills/` (tự nhận native) | `.agents/mcp_config.json` (hướng dẫn trong `SETUP.md`) | Luật đọc đầu phiên + tra bài học `scripts/recall.mjs` + skill `sena-memory` + `skill-creator` |
+| **Cursor / Codex / khác** | `AGENTS.md` | `.agents/skills/` + nhánh dự phòng `npx skills add -g` | Copy cấu hình HTTP từ `SETUP.md` | Luật đọc đầu phiên + tra bài học `scripts/recall.mjs` + skill `sena-memory` |
 
 ---
 

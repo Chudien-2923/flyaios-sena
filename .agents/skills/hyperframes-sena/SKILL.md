@@ -31,12 +31,14 @@ Skill này là lớp vận hành mỏng của Sena đặt trên bộ skill chín
 
 Làm theo `knowledge/hyperframes/02-quy-trinh-lam-viec.md`, giữ các điểm kiểm soát:
 
+- **Trước khi lên storyline và trước khi dựng:** harness không có hook OMP (Claude Code, Antigravity CLI…) thì tự tra `node scripts/recall.mjs "<loại video, asset, công cụ sắp dùng>"`; trên OMP hook tự giao bài học liên quan.
 - **Video kể chuyện > ~15 giây:** đề xuất 2–3 hướng storyline ngắn bằng chữ → **dừng chờ người dùng chọn** (trừ khi người dùng bảo làm luôn) → viết `SPEC.md`.
 - **Sau mỗi lần sửa composition:** chạy `lint` → `check --json` → `snapshot` **và mở ảnh frame ra nhìn trực tiếp**. `check` pass không chứng minh bố cục không bị đè chữ hoặc lệch dấu tiếng Việt.
 - **Video mới hoàn chỉnh:** chạy `snapshot --review` + tự rà lỗi P0/P1/P2 → ghi `REVIEW.md` (xem `knowledge/hyperframes/06-qa-render-giao-file.md`).
 - **Xem trước & Render:** mở `preview --background`, kiểm tra URL trả về mã 200 rồi gửi URL cho người dùng.
   - Theo mặc định an toàn trong `USER.md`: **dừng ở bản preview** để người dùng duyệt (hoặc tự bấm render) trước khi xuất file cuối.
   - Chỉ chạy lệnh `render` file giao ngay khi `USER.md` đặt chế độ tự render hoặc người dùng yêu cầu rõ trong phiên. (Chụp `snapshot` tự kiểm frame vẫn luôn thực hiện.)
+- **Khi gửi URL bản xem trước:** kèm mục **Bài học đã áp dụng** theo [[LEARNING]] — mỗi bài học liên quan đã được giao/tra: áp dụng thế nào (bằng chứng) hoặc vì sao không áp dụng.
 - **Project có sẵn:** đọc `timeline --json` và `history` trước khi chỉnh; bao lượt sửa bằng `history begin/end --who sena`; nếu người dùng vừa sửa trên desktop app thì chạy `catch-up`.
 
 ## 4. Cổng cần người dùng duyệt (không tự làm)

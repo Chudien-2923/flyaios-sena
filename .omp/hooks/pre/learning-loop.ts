@@ -1,19 +1,49 @@
-// learning-loop v1.0.0 — standalone OMP hook cho flyaios-sena
-// Ghi lời người dùng (ngoài Git), hỗ trợ "chốt bài học" (/chot), tự nạp MEMORY.md và chủ đề memory/<slug>.md,
-// theo dõi thay đổi memory, ẩn dòng hết hạn, tìm lại đoạn liên quan trong knowledge/ và jobs/.
-// Dữ liệu là Markdown thuần trong repo Sena; không phụ thuộc hệ sinh thái hay backend ngoài.
+// learning-loop v1.1.0 — standalone OMP hook cho flyaios-sena
+// Ghi lời người dùng (ngoài Git), hỗ trợ "chốt bài học" (/chot), tự nạp MEMORY.md, giao TỪNG DÒNG bài học chủ đề
+// `memory/<slug>.md` đúng tình huống (khi người dùng nhắn và khi Sena chạy lệnh/sửa file), thu hồi dòng hết hiệu lực,
+// theo dõi thay đổi memory, tìm lại đoạn liên quan trong knowledge/ và jobs/.
+// Cài cùng `scripts/recall.mjs` (bộ tra dùng chung, cũng là CLI cho mọi harness). Dữ liệu là Markdown thuần trong repo Sena.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 
+const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
+const ROOT = resolve(HOOK_DIR, "../../..");
+/** Bộ tra bài học dùng chung với CLI; import qua file URL để chạy được cả trên Windows. */
+const RECALL_MODULE = resolve(ROOT, "scripts/recall.mjs");
+if (!existsSync(RECALL_MODULE)) throw new Error("learning-loop: thiếu scripts/recall.mjs (bộ tra bài học) — cài cùng hook.");
+const {
+	capLessons,
+	contentHash,
+	countLines,
+	hasWord,
+	lessonTerms,
+	loadLessons,
+	normalizeVi,
+	rankLessons,
+	readFrontmatter,
+	searchTerms,
+	splitExpired,
+	todayString,
+	toolQuery,
+} = await import(pathToFileURL(RECALL_MODULE).href);
 /** File bài học theo chủ đề `memory/<file>`; từ khóa = title + aliases + slug. */
 export type TopicInfo = { slug: string; file: string; title: string; description: string; keywords: string[]; lines: number };
+/** Một dòng bài học chủ đề (đọc bởi `recall.mjs`); `id` = file + hash nguyên dòng. */
+export type Lesson = { id: string; file: string; slug: string; line: string; when: string; lesson: string };
+/** `unreadable`: file chủ đề đọc lỗi lượt này — bài học đã giao của file đó giữ nguyên, không bị coi là đã xóa. */
+export type LessonStore = { topics: TopicInfo[]; lessons: Lesson[]; unreadable: string[] };
+/** Dòng bài học đã giao vào context: id → nguyên dòng (để báo thu hồi khi dòng rời sổ). */
+export type Delivery = Record<string, string>;
 export type LoopState = {
 	memoryHash?: string;
-	topicHashes: Record<string, string>;
+	/** Dòng bài học chủ đề đang có trong context (từ compaction gần nhất). */
+	lessons: Delivery;
+	/** Dòng đã giao trước compaction, chờ giao lại ở lượt kế. */
+	reload: Delivery;
 	reminded: boolean;
 	closePending: string[];
 	closeNudges: number;
@@ -21,7 +51,8 @@ export type LoopState = {
 	recalled: string[];
 	recallVersions: Record<string, string>;
 };
-type BranchEntry = { type: string; customType?: string; details?: unknown; timestamp?: string; message?: { role?: string } };
+// Kiểu tối thiểu của phần OMP API hook này dùng (ExtensionContext/event đầy đủ ở package OMP).
+type BranchEntry = { type: string; customType?: string; details?: unknown; data?: unknown; timestamp?: string; message?: { role?: string } };
 type HookContext = {
 	agent?: { kind: string };
 	hasUI?: boolean;
@@ -31,6 +62,8 @@ type HookContext = {
 type StartEvent = { prompt?: string; reason?: string };
 
 const MESSAGE_TYPE = "sena.learning-loop";
+/** Bản ghi phiên (không gửi model) cho dòng bài học đã giao qua lệnh/file, ghi ở `turn_end` sau khi model đã nhận. */
+const TOOL_ENTRY = "sena.learning-loop.tool";
 const STALE_MS = 6 * 3_600_000;
 const EXPIRE_MS = 7 * 24 * 3_600_000;
 const MAX_CLOSE_NUDGES = 2;
@@ -38,16 +71,6 @@ const MAX_LOG_CHARS = 2_000;
 const MAX_LINES = 200;
 const RESULT_HEADING = "## Kết quả chốt";
 export const REVIEWED_MARKER = "- ⎯⎯ đã chốt tới đây ⎯⎯";
-
-export function normalizeVi(text: string): string {
-	return text
-		.normalize("NFD")
-		.replace(/[\u0300-\u036f]/g, "")
-		.replace(/[đĐ]/g, "d")
-		.toLowerCase()
-		.replace(/\s+/g, " ")
-		.trim();
-}
 
 export function isCloseCommand(text: string): boolean {
 	const trimmed = text.trim();
@@ -69,10 +92,6 @@ export function messageKey(turnIndex: number, text: string): string {
 	return createHash("sha1").update(`${turnIndex}:${text}`).digest("hex").slice(0, 8);
 }
 
-export function contentHash(text: string): string {
-	return createHash("sha1").update(text).digest("hex").slice(0, 16);
-}
-
 export function newSessionLog(startedIso: string, heading: string): string {
 	return [
 		"---",
@@ -88,18 +107,6 @@ export function newSessionLog(startedIso: string, heading: string): string {
 		"<!-- Sena điền khi chốt: bài học được đồng ý (→ đích) và bài học bị bỏ. -->",
 		"",
 	].join("\n");
-}
-
-/** Chấp nhận BOM, CRLF và `---` đóng ở cuối file. */
-export function readFrontmatter(text: string): Record<string, string> {
-	const match = /^---\n([\s\S]*?)\n---(?:\n|$)/.exec(text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n"));
-	const fields: Record<string, string> = {};
-	if (!match) return fields;
-	for (const line of match[1].split("\n")) {
-		const sepIdx = line.indexOf(": ");
-		if (sepIdx > 0) fields[line.slice(0, sepIdx).trim()] = line.slice(sepIdx + 2).trim();
-	}
-	return fields;
 }
 
 export function setFrontmatter(text: string, patch: Record<string, string>): string {
@@ -151,11 +158,6 @@ export function classifyOpenSessions(
 	return { stale, expired };
 }
 
-export function countLines(text: string): number {
-	const trimmed = text.trim();
-	return trimmed ? trimmed.split("\n").length : 0;
-}
-
 export function truncateForInjection(
 	text: string,
 	maxLines = MAX_LINES,
@@ -174,13 +176,6 @@ export function truncateForInjection(
 	return { text: out, truncated };
 }
 
-/** Khớp nguyên từ; cả hai chuỗi đã qua `normalizeVi`. */
-function hasWord(haystackNorm: string, needleNorm: string): boolean {
-	if (!needleNorm || !haystackNorm.includes(needleNorm)) return false;
-	const needle = needleNorm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-	return new RegExp(`(^|[^a-z0-9])${needle}($|[^a-z0-9])`).test(haystackNorm);
-}
-
 /** Từ khóa đầu tiên khớp nguyên từ trên chuỗi đã bỏ dấu; dùng để giải thích vì sao một file được chèn. */
 export function matchedKeyword(prompt: string, keywords: string[]): string | undefined {
 	const haystack = normalizeVi(prompt);
@@ -189,30 +184,6 @@ export function matchedKeyword(prompt: string, keywords: string[]): string | und
 
 export function matchKeywords<T extends { keywords: string[] }>(prompt: string, items: T[]): T[] {
 	return items.filter(item => matchedKeyword(prompt, item.keywords) !== undefined);
-}
-
-/**
- * Không phải file chủ đề: `README.md`, `archive.md`, `forgotten.md` và file ẩn.
- */
-export function isTopicFile(name: string): boolean {
-	return /\.md$/i.test(name) && !name.startsWith(".") && !/^(readme|archive|forgotten)\.md$/i.test(name);
-}
-
-const unquote = (value: string) => value.trim().replace(/^(["'])(.*)\1$/, "$2").trim();
-
-export function parseTopic(fileName: string, text: string): TopicInfo {
-	const slug = fileName.replace(/\.md$/i, "");
-	const fields = readFrontmatter(text);
-	const title = unquote(fields.title ?? "") || slug.replace(/-/g, " ");
-	const aliases = (fields.aliases ?? "").trim().replace(/^\[(.*)\]$/, "$1").split(",").map(unquote);
-	const seen = new Set<string>();
-	const keywords = [title, ...aliases, slug.replace(/-/g, " ")].filter(keyword => {
-		const key = normalizeVi(keyword);
-		if (!key || seen.has(key)) return false;
-		seen.add(key);
-		return true;
-	});
-	return { slug, file: fileName, title, description: unquote(fields.description ?? ""), keywords, lines: countLines(text) };
 }
 
 export function renderTopicIndex(topics: TopicInfo[]): string {
@@ -234,13 +205,14 @@ export function formatInjection(label: string, relPath: string, raw: string, hid
 }
 
 export function reconstructState(entries: BranchEntry[]): LoopState {
-	let state: LoopState = { topicHashes: {}, reminded: false, closePending: [], closeNudges: 0, recalled: [], recallVersions: {} };
+	let state: LoopState = { lessons: {}, reload: {}, reminded: false, closePending: [], closeNudges: 0, recalled: [], recallVersions: {} };
 	for (const entry of entries) {
 		if (entry.type === "compaction") {
 			state = {
 				...state,
 				memoryHash: undefined,
-				topicHashes: Object.fromEntries(Object.keys(state.topicHashes).filter(id => state.topicHashes[id] !== "missing").map(id => [id, "reload"])),
+				lessons: {},
+				reload: { ...state.reload, ...state.lessons },
 				recalled: [],
 				recallVersions: {},
 			};
@@ -250,16 +222,22 @@ export function reconstructState(entries: BranchEntry[]): LoopState {
 			entry.details &&
 			typeof entry.details === "object"
 		) {
+			// details do chính hook này ghi, cùng shape LoopState; là ảnh chụp đầy đủ, đã tính cả các bản ghi tool trước đó.
 			const saved = entry.details as Partial<LoopState>;
 			state = {
 				memoryHash: saved.memoryHash,
-				topicHashes: { ...(saved.topicHashes ?? {}) },
+				lessons: { ...(saved.lessons ?? {}) },
+				reload: { ...(saved.reload ?? {}) },
 				reminded: saved.reminded ?? false,
 				closePending: [...(saved.closePending ?? [])],
 				closeNudges: saved.closeNudges ?? 0,
 				recalled: [...(saved.recalled ?? [])],
 				recallVersions: { ...(saved.recallVersions ?? {}) },
 			};
+		} else {
+			// Dòng giao qua lệnh/file: cộng vào sổ đã giao; compaction và ảnh chụp kế tiếp xử lý như dòng giao qua tin nhắn.
+			const lessons = toolEntryLessons(entry);
+			if (lessons) state = { ...state, lessons: { ...state.lessons, ...lessons } };
 		}
 	}
 	return state;
@@ -284,6 +262,9 @@ export function summarizeInjections(entries: BranchEntry[]): string[] {
 		) {
 			const injected: unknown[] = entry.details.injected;
 			for (const reason of injected) if (typeof reason === "string") lines.push(`- ${at(entry)} · ${reason}`);
+		} else {
+			const lessons = toolEntryLessons(entry);
+			if (lessons) lines.push(`- ${at(entry)} · giao khi Sena chạy lệnh/sửa file: ${Object.keys(lessons).length} dòng bài học chủ đề`);
 		}
 	}
 	return lines;
@@ -343,49 +324,12 @@ export function appendMemoryChanges(log: string, time: string, changes: string[]
 		: `${base}\n\n${MEMORY_CHANGES_HEADING}\n\n${lines}\n`;
 }
 
-// ---------------------------------------------------------------- hạn dùng từng dòng
-
-const UNTIL = /·\s*đến\s+(\d{4}-\d{2}-\d{2})\s*$/;
-
-export function splitExpired(text: string, today: string): { text: string; expired: string[] } {
-	const kept: string[] = [];
-	const expired: string[] = [];
-	for (const line of text.split("\n")) {
-		const match = /^\s*- /.test(line) ? UNTIL.exec(line.normalize("NFC")) : null;
-		const until = match?.[1];
-		const date = until ? new Date(`${until}T00:00:00Z`) : undefined;
-		const valid = date && Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === until;
-		if (valid && until! < today) expired.push(line.trim());
-		else kept.push(line);
-	}
-	return { text: kept.join("\n"), expired };
-}
-
 // ---------------------------------------------------------------- tìm lại trong knowledge/ và jobs/
 
 export type Chunk = { id: string; path: string; heading: string; context: string; text: string; norm: string };
 export type RankedChunk = { chunk: Chunk; hits: string[]; score: number };
 
-const STOPWORDS = new Set(
-	"toi minh ban cho cua la va voi nay do thi mot cac nhung khi se da dang co khong duoc lam nhe nha ra vao len xuong roi gi nao the nhu trong ngoai tren duoi hay ma neu vi nen cung con lai nua muon can phai giup xem thu di o tai tu den theo bang ve sau truoc ok oke chi xin chao".split(
-		" ",
-	),
-);
-
-export function searchTerms(prompt: string): string[] {
-	const terms = new Set<string>();
-	const text = prompt.replace(/\r\n/g, "\n");
-	for (const raw of text.split(/[.!?;:\n]/)) {
-		const segment = normalizeVi(raw).replace(/\b(?:kiem tra|giai thich|tra loi|cam on|tiep tuc|tien do|cong viec|hom nay)\b/g, " ");
-		const tokens = segment.split(/[^a-z0-9]+/).filter(Boolean);
-		for (let i = 0; i + 1 < tokens.length; i++) {
-			if (!STOPWORDS.has(tokens[i]) && !STOPWORDS.has(tokens[i + 1])) terms.add(`${tokens[i]} ${tokens[i + 1]}`);
-		}
-		for (const token of tokens) if (token.length >= 3 && !STOPWORDS.has(token)) terms.add(token);
-	}
-	return [...terms];
-}
-
+/** Chia theo heading Markdown (bỏ qua `#` trong code block); đoạn chỉ có heading thì bỏ. */
 export function splitChunks(filePath: string, text: string): Chunk[] {
 	const chunks: Chunk[] = [];
 	let heading = filePath;
@@ -476,23 +420,140 @@ export function excerptChunk(chunk: Chunk, maxLines = 12, maxChars = 1_200, term
 
 // ---------------------------------------------------------------- wiring OMP
 
-const HOOK_DIR = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(HOOK_DIR, "../../..");
+// HOOK_DIR, ROOT ở đầu file (cần trước khi import bộ tra).
 const SESSIONS_DIR = join(ROOT, "journal", "sessions");
 const MEMORY_DIR = join(ROOT, "memory");
 const pad = (n: number) => String(n).padStart(2, "0");
 const toRel = (filePath: string) => relative(ROOT, filePath).replaceAll("\\", "/");
 
-function listTopics(): TopicInfo[] {
-	if (!existsSync(MEMORY_DIR)) return [];
-	const topics: TopicInfo[] = [];
-	for (const name of readdirSync(MEMORY_DIR).sort()) {
-		if (!isTopicFile(name)) continue;
-		try {
-			topics.push(parseTopic(name, readFileSync(join(MEMORY_DIR, name), "utf8")));
-		} catch {}
+export const MAX_TOPIC_LESSONS = 8;
+export const MAX_TOPIC_CHARS = 2_000;
+export const MAX_SITUATION_LESSONS = 3;
+export const MAX_SITUATION_CHARS = 900;
+/** Trần số dòng bài học chủ đề trong context giữa hai lần compaction; vượt thì chỉ tra bằng CLI. */
+export const MAX_SESSION_LESSONS = 30;
+
+const PROMPT_HEADING =
+	'Bài học chủ đề liên quan — đã được duyệt; hook chọn từng dòng theo tình huống (bổ sung, các bài đã nạp trước vẫn hiệu lực trừ khi bị thu hồi). Cần thêm thì chạy `node scripts/recall.mjs "<tình huống>"`:';
+const REVOKED_HEADING = "Các bài học sau KHÔNG CÒN HIỆU LỰC (đã sửa, xóa, hết hạn, chuyển archive hoặc người dùng yêu cầu quên) — bỏ, không áp dụng nữa:";
+const BASH_HEADING = "[learning-loop] Lệnh CHƯA chạy — dừng một nhịp để đọc bài học đã được duyệt liên quan tới việc sắp làm:";
+const BASH_RETRY_NOTE =
+	"Áp dụng nếu đúng tình huống rồi chạy lại lệnh (sửa lệnh nếu bài học yêu cầu). Lần chạy lại không bị dừng vì các bài này.";
+const FILE_HEADING = "[learning-loop] Bài học đã được duyệt liên quan tới file vừa ghi/sửa — nếu thay đổi vừa rồi trái bài học thì sửa lại ngay:";
+const APPLY_NOTE =
+	'Khi giao bản xem trước hoặc kết quả, kèm mục "Bài học đã áp dụng": mỗi bài liên quan ghi đã áp dụng thế nào (bằng chứng) hoặc vì sao không áp dụng.';
+
+export function renderLessonList(heading: string, lessons: { file: string; line: string }[]): string {
+	return [heading, ...lessons.map(lesson => `- [${lesson.file}] ${lesson.line.replace(/^-\s+/, "")}`)].join("\n");
+}
+
+export type PromptLessonPlan = {
+	/** Sổ đã giao sau lượt này (dòng còn hiệu lực + dòng mới). */
+	delivered: Delivery;
+	/** Dòng chờ giao lại mà file đang đọc lỗi: giữ cho lượt sau. */
+	reload: Delivery;
+	add: Lesson[];
+	revoked: { file: string; line: string }[];
+	/** Lý do từng nhóm dòng mới, cho `/nap`. */
+	reasons: string[];
+};
+
+const fileOfLesson = (id: string) => id.slice(0, id.lastIndexOf("#"));
+
+/**
+ * Bài học chủ đề cho một tin nhắn của người dùng. Thứ tự: (1) thu hồi dòng đã giao nhưng không còn trong sổ hiệu lực
+ * (file đọc lỗi thì giữ nguyên); (2) giao lại dòng đã giao trước compaction; (3) dòng thay thế giống nhất cùng file cho
+ * dòng vừa thu hồi hoặc dòng chờ giao lại đã bị sửa; (4) chủ đề được gọi tên/alias: dòng xếp hạng cao trong chủ đề rồi
+ * theo thứ tự file, trần 8 dòng/2.000 ký tự; (5) theo tình huống trên phần sổ còn lại, trần 3 dòng/900 ký tự. Chọn top-N
+ * TRƯỚC khi bỏ dòng đã giao, để nhắc lại không kéo thêm dòng kém hơn. Tổng dòng trong context ≤ MAX_SESSION_LESSONS.
+ */
+export function planPromptLessons(prompt: string, store: LessonStore, delivered: Delivery, reload: Delivery): PromptLessonPlan {
+	const active = new Map(store.lessons.map(lesson => [lesson.id, lesson]));
+	const unreadable = new Set(store.unreadable);
+	const kept: Delivery = {};
+	const revoked: { file: string; line: string }[] = [];
+	for (const [id, line] of Object.entries(delivered)) {
+		if (active.has(id) || unreadable.has(fileOfLesson(id))) kept[id] = line;
+		else revoked.push({ file: fileOfLesson(id), line });
 	}
-	return topics;
+	const carry: Delivery = {};
+	const reloadActive: Lesson[] = [];
+	const changed = [...revoked];
+	for (const [id, line] of Object.entries(reload)) {
+		if (id in kept) continue;
+		const lesson = active.get(id);
+		if (lesson) reloadActive.push(lesson);
+		else if (unreadable.has(fileOfLesson(id))) carry[id] = line;
+		else changed.push({ file: fileOfLesson(id), line });
+	}
+	const add: Lesson[] = [];
+	const reasons: string[] = [];
+	const take = (lessons: Lesson[], reason: string) => {
+		const fresh = lessons.filter(lesson => !(lesson.id in kept) && !add.some(item => item.id === lesson.id));
+		const room = MAX_SESSION_LESSONS - Object.keys(kept).length - add.length;
+		const chosen = fresh.slice(0, Math.max(0, room));
+		if (chosen.length) {
+			add.push(...chosen);
+			reasons.push(`${reason}: ${chosen.length} dòng (${[...new Set(chosen.map(lesson => lesson.file))].join(", ")})`);
+		}
+	};
+	take(reloadActive, "giao lại sau compaction");
+	for (const old of changed) {
+		const sameFile = store.lessons.filter(lesson => lesson.file === old.file && !(lesson.id in kept));
+		take(rankLessons(lessonTerms(old.line), sameFile).slice(0, 1).map((item: { lesson: Lesson }) => item.lesson), "dòng thay thế bài vừa đổi");
+	}
+	const terms = lessonTerms(prompt);
+	const named = store.topics.filter(topic => matchedKeyword(prompt, topic.keywords));
+	for (const topic of named) {
+		const own = store.lessons.filter(lesson => lesson.slug === topic.slug);
+		const ranked = rankLessons(terms, own).map((item: { lesson: Lesson }) => item.lesson);
+		const ordered = [...ranked, ...own.filter(lesson => !ranked.includes(lesson))];
+		take(capLessons(ordered, MAX_TOPIC_LESSONS, MAX_TOPIC_CHARS), `chủ đề ${topic.slug} — khớp "${matchedKeyword(prompt, topic.keywords)}"`);
+	}
+	const rest = store.lessons.filter(lesson => !named.some(topic => topic.slug === lesson.slug));
+	const situational = capLessons(rankLessons(terms, rest), MAX_SITUATION_LESSONS, MAX_SITUATION_CHARS, (item: { lesson: Lesson }) => item.lesson.line);
+	take(situational.map((item: { lesson: Lesson }) => item.lesson), "theo tình huống trong tin nhắn");
+	return { delivered: { ...kept, ...Object.fromEntries(add.map(lesson => [lesson.id, lesson.line])) }, reload: carry, add, revoked, reasons };
+}
+
+/**
+ * Bài học cho một lệnh/file Sena đang làm: tối đa 3 dòng/900 ký tự chưa giao; top-N chọn trước khi bỏ dòng đã giao.
+ * `pending` (dòng đã chọn trong lượt, model chưa nhận) chiếm chỗ trong trần phiên nhưng không miễn dừng cho lệnh khác.
+ */
+export function planToolLessons(toolName: string, input: unknown, store: LessonStore, delivered: Delivery, pending: Delivery = {}): Lesson[] {
+	const query = toolQuery(toolName, input);
+	if (!query) return [];
+	const reserved = new Set([...Object.keys(delivered), ...Object.keys(pending)]);
+	const top = capLessons(rankLessons(lessonTerms(query, { tool: true }), store.lessons), MAX_SITUATION_LESSONS, MAX_SITUATION_CHARS, (item: { lesson: Lesson }) => item.lesson.line);
+	const fresh = top.map((item: { lesson: Lesson }) => item.lesson).filter((lesson: Lesson) => !(lesson.id in delivered));
+	let room = MAX_SESSION_LESSONS - reserved.size;
+	return fresh.filter((lesson: Lesson) => lesson.id in pending || room-- > 0);
+}
+
+type ToolEvent = { toolName: string; toolCallId?: string; input: unknown };
+
+/**
+ * Dòng đã đưa vào thông báo dừng/context trong lượt hiện tại nhưng model chưa nhận: CHƯA tính là đã giao, nên mọi lệnh
+ * liên quan khác trong cùng lượt (OMP chuẩn bị cả đợt tool trước khi chạy) cũng bị dừng. `turn_end` ghi chúng vào
+ * phiên (`TOOL_ENTRY`) — từ đó compaction, thu hồi và resume dùng chung một nguồn với dòng giao qua tin nhắn.
+ */
+const pendingTool = new Map<string, Delivery>();
+
+function pickToolLessons(event: ToolEvent, ctx: HookContext): Lesson[] {
+	const session = ctx.sessionManager.getSessionId();
+	const pending = pendingTool.get(session) ?? {};
+	const picked = planToolLessons(event.toolName, event.input, loadLessons(ROOT, todayString()), reconstructState(ctx.sessionManager.getBranch()).lessons, pending);
+	if (picked.length) pendingTool.set(session, { ...pending, ...Object.fromEntries(picked.map(lesson => [lesson.id, lesson.line])) });
+	return picked;
+}
+
+/** Dòng bài học trong bản ghi `TOOL_ENTRY` do chính hook ghi; shape khác thì bỏ qua. */
+function toolEntryLessons(entry: BranchEntry): Delivery | undefined {
+	if (entry.type !== "custom" || entry.customType !== TOOL_ENTRY) return undefined;
+	if (!entry.data || typeof entry.data !== "object" || !("lessons" in entry.data)) return undefined;
+	const lessons = entry.data.lessons;
+	if (!lessons || typeof lessons !== "object") return undefined;
+	return Object.fromEntries(Object.entries(lessons).filter((pair): pair is [string, string] => typeof pair[1] === "string"));
 }
 
 function listSessionFiles(): { path: string; status: string; last: string }[] {
@@ -551,9 +612,9 @@ export function closeInstruction(
 		list,
 		"",
 		"Trả bạn MỘT danh sách đánh số, mỗi dòng: bài học viết dạng sự thật/điều kiện (không mệnh lệnh) · phạm vi · đích · trích ngắn lời bạn làm nguồn. Không ghi tên/mã file phiên vào bài học.",
-		"Phạm vi và đích (mỗi bài học ghi một dòng `- YYYY-MM-DD · bài học · nguồn: \"…\"`; bài học chỉ đúng tới một mốc thì thêm `· đến YYYY-MM-DD`):",
+		"Phạm vi và đích (mỗi bài học ghi một dòng `- YYYY-MM-DD · bài học · nguồn: \"…\"`; bài học chỉ đúng tới một mốc thì thêm `· đến YYYY-MM-DD` ở cuối):",
 		`  - \`chung\` (đúng ở mọi buổi, không phụ thuộc loại video/kênh) → \`MEMORY.md\` (hiện ${memoryLines}/${MAX_LINES} dòng)`,
-		"  - `chủ đề <slug>` (chỉ đúng cho một loại video, công cụ hoặc một kênh/khách hàng riêng) → `memory/<slug>.md`. Chủ đề đang có:",
+		"  - `chủ đề <slug>` (chỉ đúng cho một loại video, công cụ hoặc một kênh/khách hàng riêng) → `memory/<slug>.md`, dạng `- YYYY-MM-DD · bài học · khi: <tình huống áp dụng> · nguồn: \"…\"`. `khi:` là điều kiện hook dùng để giao bài học đúng lúc: ghi tình huống/bước cụ thể kèm các từ Sena sẽ gõ khi làm (tên công cụ, lệnh, thuật ngữ quốc tế như music, tts, render); không đưa từ chung của nghề (video, dựng, làm) vào `khi:` vì sẽ kéo bài học vào mọi việc. Chủ đề đang có:",
 		topicTargets,
 		"    Chủ đề mới: đề xuất slug (không dấu, nối gạch ngang), title, description, aliases (các từ khóa hay dùng, cách nhau dấu phẩy) ngay trong dòng; bạn đồng ý mới tạo file, đầu file có frontmatter `title`/`description`/`aliases`.",
 		"  - quy trình nhiều bước lặp lại → ghi đề xuất tạo Skill mới tại `.agents/skills/<ten-skill>/SKILL.md` vào \"Kết quả chốt\" (dùng `/learn` + `skill-creator`), không sửa Skill lúc này",
@@ -603,8 +664,7 @@ function injectFile(
 	return parts.length ? { text: parts.join("\n\n"), hash } : { hash };
 }
 
-const todayString = (now = new Date()) => `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-
+/** File bài học: `MEMORY.md` và `memory/*.md` (trừ README). */
 function lessonFiles(): string[] {
 	const files = [join(ROOT, "MEMORY.md")];
 	if (existsSync(MEMORY_DIR)) {
@@ -662,7 +722,7 @@ function expiredLessons(topics: TopicInfo[]): string[] {
 	const today = todayString();
 	const files = [join(ROOT, "MEMORY.md"), ...topics.map(topic => join(MEMORY_DIR, topic.file))];
 	return files.flatMap(file =>
-		existsSync(file) ? splitExpired(readFileSync(file, "utf8"), today).expired.map(line => `\`${toRel(file)}\`: ${line}`) : [],
+		existsSync(file) ? splitExpired(readFileSync(file, "utf8"), today).expired.map((line: string) => `\`${toRel(file)}\`: ${line}`) : [],
 	);
 }
 
@@ -764,7 +824,8 @@ export default function learningLoop(pi: ExtensionAPI): void {
 			for (const filePath of expired) writeFileSync(filePath, setFrontmatter(readFileSync(filePath, "utf8"), { status: "hết hạn" }));
 		});
 
-		const topics = guard("topics", [] as TopicInfo[], listTopics);
+		const store = guard("lessons", null as LessonStore | null, () => loadLessons(ROOT, todayString()));
+		const topics = store?.topics ?? [];
 		const memoryFile = join(ROOT, "MEMORY.md");
 		const memoryLines = guard("memory lines", 0, () => (existsSync(memoryFile) ? countLines(readFileSync(memoryFile, "utf8")) : 0));
 		const forgottenFile = join(MEMORY_DIR, "forgotten.md");
@@ -782,7 +843,8 @@ export default function learningLoop(pi: ExtensionAPI): void {
 		const injected: string[] = [];
 		const next: LoopState = {
 			...state,
-			topicHashes: { ...state.topicHashes },
+			lessons: { ...state.lessons },
+			reload: { ...state.reload },
 			recalled: [...state.recalled],
 			recallVersions: { ...state.recallVersions },
 		};
@@ -830,7 +892,7 @@ export default function learningLoop(pi: ExtensionAPI): void {
 				memoryFile,
 				state.memoryHash,
 				index
-					? `Mục lục bài học theo chủ đề (\`memory/\`) — hook tự chèn file khi tin nhắn khớp từ khóa; nếu đang làm việc thuộc chủ đề nào mà file chưa được chèn thì tự mở đọc:\n${index}`
+					? `Mục lục bài học theo chủ đề (\`memory/\`) — hook tự chèn từng dòng liên quan khi tin nhắn của người dùng hoặc lệnh/file Sena đang làm khớp tình huống; cần tra thêm thì chạy \`node scripts/recall.mjs "<tình huống>"\`:\n${index}`
 					: "",
 			),
 		);
@@ -842,29 +904,21 @@ export default function learningLoop(pi: ExtensionAPI): void {
 			);
 		}
 
-		for (const slug of Object.keys(state.topicHashes)) {
-			if (state.topicHashes[slug] === "missing" || topics.some(topic => topic.slug === slug)) continue;
-			parts.push(`Chủ đề \`${slug}\` không còn trong kho memory; bản bài học của chủ đề này đã nạp trước không còn hiệu lực.`);
-			next.topicHashes[slug] = "missing";
-			injected.push(`thu hồi chủ đề ${slug} — file không còn`);
-		}
-
-		for (const topic of topics) {
-			const hit = matchedKeyword(prompt, topic.keywords);
-			if (!hit && !state.topicHashes[topic.slug]) continue;
-			const reason = hit ? `khớp "${hit}"` : "kiểm tra lại file đã nạp (nội dung/hạn dùng đổi)";
-			const lessons = guard(`topic ${topic.slug}`, { hash: state.topicHashes[topic.slug] ?? "error" } as { text?: string; hash: string }, () =>
-				injectFile(
-					`Bài học chủ đề \`${topic.slug}\` (${reason}) đã được duyệt — áp dụng khi làm loại việc này`,
-					join(MEMORY_DIR, topic.file),
-					state.topicHashes[topic.slug],
-				),
-			);
-			next.topicHashes[topic.slug] = lessons.hash;
-			if (lessons.text) {
-				parts.push(lessons.text);
-				injected.push(`chủ đề ${topic.slug} — ${reason}`);
-			}
+		// Đọc sổ lỗi toàn bộ thì không giao/thu hồi gì lượt này: thiếu dữ liệu không phải bằng chứng bài học đã bị xóa.
+		if (store) {
+			guard("lessons delivery", undefined, () => {
+				const plan = planPromptLessons(prompt, store, state.lessons, state.reload);
+				next.lessons = plan.delivered;
+				next.reload = plan.reload;
+				if (plan.revoked.length) {
+					parts.push(renderLessonList(REVOKED_HEADING, plan.revoked));
+					injected.push(`thu hồi ${plan.revoked.length} dòng bài học không còn hiệu lực`);
+				}
+				if (plan.add.length) {
+					parts.push(`${renderLessonList(PROMPT_HEADING, plan.add)}\n${APPLY_NOTE}`);
+					injected.push(...plan.reasons);
+				}
+			});
 		}
 
 		if (!closing) {
@@ -910,6 +964,45 @@ export default function learningLoop(pi: ExtensionAPI): void {
 		}
 	});
 
+	/** Lệnh bash có bài học liên quan chưa giao: dừng một nhịp, trả bài học cho Sena đọc TRƯỚC khi lệnh chạy. */
+	pi.on("tool_call", async (event: ToolEvent, ctx: HookContext) => {
+		if (ctx.agent && ctx.agent.kind !== "main") return;
+		if (event.toolName !== "bash") return;
+		let picked: Lesson[];
+		try {
+			picked = pickToolLessons(event, ctx);
+		} catch {
+			return; // Lỗi tra cứu không bao giờ được chặn công việc.
+		}
+		if (!picked.length) return;
+		return { block: true, reason: `${renderLessonList(BASH_HEADING, picked)}\n${BASH_RETRY_NOTE}\n${APPLY_NOTE}` };
+	});
+
+	/** File vừa ghi/sửa thành công có bài học liên quan chưa giao: đưa vào lượt kế (không chặn — chặn buộc gửi lại cả file). */
+	pi.on("tool_result", async (event: ToolEvent & { isError?: boolean }, ctx: HookContext) => {
+		if (ctx.agent && ctx.agent.kind !== "main") return;
+		if ((event.toolName !== "write" && event.toolName !== "edit") || event.isError) return;
+		try {
+			const picked = pickToolLessons(event, ctx);
+			if (picked.length) return { additionalContext: `${renderLessonList(FILE_HEADING, picked)}\n${APPLY_NOTE}` };
+		} catch {
+			// Như trên: không làm hỏng kết quả tool.
+		}
+	});
+
+	/** Hết lượt: model đã nhận thông báo dừng/context của các lệnh trong lượt → ghi dòng đã giao vào phiên. */
+	pi.on("turn_end", async (_event: unknown, ctx: HookContext) => {
+		const session = ctx.sessionManager.getSessionId();
+		const lessons = pendingTool.get(session);
+		if (!lessons) return;
+		pendingTool.delete(session);
+		try {
+			pi.appendEntry(TOOL_ENTRY, { lessons });
+		} catch (error) {
+			if (ctx.hasUI) ctx.ui.notify(`learning-loop: không ghi được sổ bài học đã giao: ${(error as Error).message}`, "warning");
+		}
+	});
+
 	pi.registerCommand("chot", {
 		description: "Chốt bài học của buổi làm việc",
 		handler: async () => {
@@ -926,7 +1019,7 @@ export default function learningLoop(pi: ExtensionAPI): void {
 			try {
 				const memoryFile = join(ROOT, "MEMORY.md");
 				const memoryLines = existsSync(memoryFile) ? countLines(readFileSync(memoryFile, "utf8")) : 0;
-				const topics = listTopics().map(topic => `${topic.slug} ${topic.lines}/${MAX_LINES}`);
+				const topics = loadLessons(ROOT, todayString()).topics.map((topic: TopicInfo) => `${topic.slug} ${topic.lines}/${MAX_LINES}`);
 				status = `Hiện có: MEMORY.md ${memoryLines}/${MAX_LINES} dòng; chủ đề: ${topics.join(", ") || "chưa có"}.`;
 			} catch (error) {
 				status = `Không đọc được trạng thái memory: ${(error as Error).message}`;

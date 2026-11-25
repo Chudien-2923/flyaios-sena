@@ -28,12 +28,12 @@ Skill này đảm bảo việc **tự training Sena** chạy ổn định, an to
    - Chỉ đúng cho 1 video cụ thể → **không lưu**
 4. **Trình MỘT danh sách đánh số và DỪNG CHỜ DUYỆT:**
    Mỗi dòng ghi rõ:
-   `1. <bài học dạng quy tắc/điều kiện rõ ràng> · phạm vi: <chung | chủ đề slug | USER.md> · đích: <file> · nguồn: "<trích ngắn>"`
+   `1. <bài học dạng quy tắc/điều kiện rõ ràng> · phạm vi: <chung | chủ đề slug | USER.md> · đích: <file> · nguồn: "<trích ngắn>"`; bài học chủ đề ghi thêm `· khi: <tình huống áp dụng>` (tình huống/bước cụ thể kèm từ Sena sẽ gõ khi làm, không dùng từ chung như video, dựng).
    - Nếu không có gì đáng lưu, nói thẳng *"Phiên này chưa có bài học mới cần lưu."*
    - Nếu ghi xong làm file vượt 200 dòng (hoặc có dòng `· đến YYYY-MM-DD` đã quá hạn), kèm ngay đề xuất chuyển bớt sang file chủ đề phù hợp hoặc `memory/archive.md` trong cùng danh sách.
 5. **Chỉ ghi sau khi người dùng xác nhận** (ví dụ: *"đồng ý 1, 3; bỏ 2"*):
    - Đọc lại file đích ngay trước khi sửa.
-   - Ghi theo định dạng: `- YYYY-MM-DD · <bài học> · nguồn: "<tóm tắt>"` (thêm `· đến YYYY-MM-DD` nếu bài học chỉ có hạn tạm).
+   - Ghi theo định dạng: `- YYYY-MM-DD · <bài học> · nguồn: "<tóm tắt>"`; dòng trong `memory/<slug>.md` thêm `· khi: <tình huống áp dụng>` ngay trước `nguồn:` (thêm `· đến YYYY-MM-DD` ở cuối nếu bài học chỉ có hạn tạm).
    - Nếu tạo file `memory/<slug>.md` mới, ghi đủ frontmatter (`title`, `description`, `aliases`) và cập nhật mục lục `memory/README.md`.
    - Nếu đang dùng OMP có file nhật ký `journal/sessions/`, điền mục `## Kết quả chốt` và đổi `status: chốt` (hoặc `status: bỏ` nếu người dùng bỏ).
    - Báo ngắn các file đã cập nhật và gợi ý người dùng commit nếu muốn lưu mốc Git.

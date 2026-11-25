@@ -26,10 +26,12 @@ Skill này là lớp vận hành mỏng của Sena trên bộ 13 skill chính th
 
 ## 3. Vòng làm việc và điểm dừng
 
+- **Trước khi lên storyline và trước khi dựng:** harness không có hook OMP (Claude Code, Antigravity CLI…) thì tự tra `node scripts/recall.mjs "<loại video, asset, công cụ sắp dùng>"`; trên OMP hook tự giao bài học liên quan.
 - **Video kể chuyện > ~15 giây:** đề xuất 2–3 storyline ngắn bằng chữ → **dừng chờ người dùng chọn** (trừ khi người dùng bảo làm luôn). Dựng đúng yêu cầu, không tự thêm voiceover/captions/nhạc/tỷ lệ mới.
 - **Preview Studio:** chạy `npx remotion studio --no-open` (tránh tự bật trình duyệt cá nhân), kiểm URL trả 200 rồi gửi URL cho người dùng tự mở.
 - **Tự kiểm sau mỗi lần sửa:** `npm run lint` (eslint + tsc) → `npx remotion compositions` → xuất vài frame tự kiểm `npx remotion render <id> out/frames --frames=<đầu,beat chính,cuối> --image-format=png` **và mở ảnh ra nhìn trực tiếp**. Lint sạch không chứng minh bố cục, font hay dấu tiếng Việt đúng.
 - **Chế độ render file giao:** theo `USER.md` — mặc định dừng ở URL Studio + ảnh stills để người dùng duyệt (hoặc tự bấm Render trong Studio); chỉ chạy render file giao cuối khi `USER.md` bật tự render hoặc người dùng yêu cầu rõ (luôn truyền rõ composition ID).
+- **Khi gửi URL Studio + stills:** kèm mục **Bài học đã áp dụng** theo [[LEARNING]] — mỗi bài học liên quan đã được giao/tra: áp dụng thế nào (bằng chứng) hoặc vì sao không áp dụng.
 - **Project có sẵn:** đọc `src/Root.tsx`, `package.json`, `remotion.config.ts` trước khi sửa; giữ nguyên phần người dùng đã chỉnh tay hoặc hỏi trước khi thay đổi.
 
 ## 4. Giấy phép sử dụng (License)
